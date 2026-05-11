@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover - optional dependency until ERP sync is 
 
 
 ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / "planner.db"
+DB_PATH = Path(os.environ.get("DB_PATH", str(ROOT / "planner.db")))
 ERP_PG_HOST = os.environ.get("ERP_PG_HOST", "localhost")
 ERP_PG_PORT = int(os.environ.get("ERP_PG_PORT", "5432"))
 ERP_PG_DBNAME = os.environ.get("ERP_PG_DBNAME", "")
@@ -9061,8 +9061,9 @@ def api_history():
         return jsonify(rows(con.execute(sql, params)))
 
 
+ensure_db()
+
 if __name__ == "__main__":
-    ensure_db()
     if os.environ.get("APP_AUTO_RELOAD", "1") == "1":
         _start_dev_reload_watcher()
     app.run(debug=True, port=5000, use_reloader=False)
