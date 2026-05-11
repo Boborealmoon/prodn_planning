@@ -10,7 +10,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request
+
+load_dotenv()
 
 try:
     from openpyxl import load_workbook
@@ -18,15 +21,19 @@ except ImportError:  # pragma: no cover - optional until Excel sync is used
     load_workbook = None
 
 try:
-    import pyodbc
+    import psycopg2
+    import psycopg2.extras
 except ImportError:  # pragma: no cover - optional dependency until ERP sync is enabled
-    pyodbc = None
+    psycopg2 = None
 
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "planner.db"
-ERP_DSN = os.environ.get("ERP_ODBC_DSN", "postgresql")
-ERP_DATABASE = os.environ.get("ERP_DATABASE", "comax")
+ERP_PG_HOST = os.environ.get("ERP_PG_HOST", "localhost")
+ERP_PG_PORT = int(os.environ.get("ERP_PG_PORT", "5432"))
+ERP_PG_DBNAME = os.environ.get("ERP_PG_DBNAME", "")
+ERP_PG_USER = os.environ.get("ERP_PG_USER", "")
+ERP_PG_PASSWORD = os.environ.get("ERP_PG_PASSWORD", "")
 STANDARD_START = 510
 STANDARD_END = 1200
 STANDARD_WINDOWS = [(510, 720), (765, 960), (975, 1200)]
@@ -122,32 +129,28 @@ def api_error(message, status=400, details=None):
     return jsonify(payload), status
 
 
-def erp_test_connection(dsn=None, database=None, uid=None, pwd=None):
-    if pyodbc is None:
-        raise RuntimeError("pyodbc is not installed. Run pip install pyodbc first.")
+def erp_pg_connect(host=None, port=None, dbname=None, user=None, password=None):
+    if psycopg2 is None:
+        raise RuntimeError("psycopg2 is not installed. Run: pip install psycopg2-binary")
+    return psycopg2.connect(
+        host=host or ERP_PG_HOST,
+        port=port or ERP_PG_PORT,
+        dbname=dbname or ERP_PG_DBNAME,
+        user=user or ERP_PG_USER,
+        password=password or ERP_PG_PASSWORD,
+        connect_timeout=5,
+    )
 
-    dsn = dsn or ERP_DSN
-    database = database or ERP_DATABASE
-    parts = [f"DSN={dsn}"]
-    if database:
-        parts.append(f"DATABASE={database}")
-    if uid:
-        parts.append(f"UID={uid}")
-    if pwd:
-        parts.append(f"PWD={pwd}")
-    conn_str = ";".join(parts) + ";"
 
-    with pyodbc.connect(conn_str, timeout=5, autocommit=True) as con:
-        row = con.cursor().execute(
-            """
-            SELECT current_database() AS database_name,
-                   current_user AS current_user
-            """
-        ).fetchone()
+def erp_test_connection(host=None, port=None, dbname=None, user=None, password=None):
+    with erp_pg_connect(host=host, port=port, dbname=dbname, user=user, password=password) as con:
+        with con.cursor() as cur:
+            cur.execute("SELECT current_database(), current_user")
+            db_name, current_user = cur.fetchone()
         return {
-            "dsn": dsn,
-            "database": row[0],
-            "current_user": row[1],
+            "host": host or ERP_PG_HOST,
+            "database": db_name,
+            "current_user": current_user,
         }
 
 
@@ -6539,10 +6542,11 @@ def api_test_erp_connection():
     data = request.get_json(silent=True) or {}
     try:
         result = erp_test_connection(
-            dsn=data.get("dsn"),
-            database=data.get("database"),
-            uid=data.get("uid"),
-            pwd=data.get("pwd"),
+            host=data.get("host"),
+            port=data.get("port"),
+            dbname=data.get("dbname"),
+            user=data.get("user"),
+            password=data.get("password"),
         )
         return jsonify({"success": True, **result})
     except Exception as exc:
