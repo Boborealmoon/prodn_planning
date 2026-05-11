@@ -34,6 +34,7 @@ ERP_PG_PORT = int(os.environ.get("ERP_PG_PORT", "5432"))
 ERP_PG_DBNAME = os.environ.get("ERP_PG_DBNAME", "")
 ERP_PG_USER = os.environ.get("ERP_PG_USER", "")
 ERP_PG_PASSWORD = os.environ.get("ERP_PG_PASSWORD", "")
+ERP_PG_SCHEMA = os.environ.get("ERP_PG_SCHEMA", "public")
 STANDARD_START = 510
 STANDARD_END = 1200
 STANDARD_WINDOWS = [(510, 720), (765, 960), (975, 1200)]
@@ -152,6 +153,108 @@ def erp_test_connection(host=None, port=None, dbname=None, user=None, password=N
             "database": db_name,
             "current_user": current_user,
         }
+
+
+ERP_PG_SQL_DIR = ROOT / "sql"
+
+ERP_PG_SQL_FILES = {
+    "ProcessSheets":        ERP_PG_SQL_DIR / "erp_process_sheets.sql",
+    "Materials (Per PS)":   ERP_PG_SQL_DIR / "erp_materials_ps.sql",
+    "Material (Per BOM)":   ERP_PG_SQL_DIR / "erp_materials_bom.sql",
+    "BOM_op_stage":         ERP_PG_SQL_DIR / "erp_bom_ops.sql",
+    "Workorder Tracker":    ERP_PG_SQL_DIR / "erp_workorder.sql",
+    "Active Orders":        ERP_PG_SQL_DIR / "erp_active_orders.sql",
+}
+
+
+def erp_pg_list_tables():
+    with erp_pg_connect() as pg_con:
+        with pg_con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name,
+                       array_agg(column_name::text ORDER BY ordinal_position) AS columns
+                FROM information_schema.columns
+                WHERE table_schema = %s
+                GROUP BY table_name
+                ORDER BY table_name
+                """,
+                (ERP_PG_SCHEMA,),
+            )
+            return [{"table": row[0], "columns": row[1]} for row in cur.fetchall()]
+
+
+def erp_pg_fetch_sql_file(pg_con, sql_file):
+    query = sql_file.read_text(encoding="utf-8").strip()
+    if not query:
+        return []
+    with pg_con.cursor() as cur:
+        cur.execute(query)
+        columns = [col.name for col in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def run_erp_pg_sync(local_con):
+    sync_batch_id = uuid4().hex
+    local_con.execute(
+        """
+        INSERT INTO erp_sync_log (sync_batch_id, source_name, workbook_name, status)
+        VALUES (?, 'pg-direct', ?, 'STARTED')
+        """,
+        (sync_batch_id, f"{ERP_PG_HOST}/{ERP_PG_DBNAME}"),
+    )
+    try:
+        backfill_erp_sync_locks(local_con)
+        workbook_data = {}
+        missing_required = []
+        with erp_pg_connect() as pg_con:
+            for sheet_name, sql_file in ERP_PG_SQL_FILES.items():
+                if not sql_file.exists():
+                    workbook_data[sheet_name] = []
+                    if sheet_name in ERP_REQUIRED_SHEETS:
+                        missing_required.append(sheet_name)
+                    continue
+                workbook_data[sheet_name] = erp_pg_fetch_sql_file(pg_con, sql_file)
+        if missing_required:
+            raise ValueError(
+                f"SQL files missing for required data sources: {', '.join(missing_required)}. "
+                f"Create the files in {ERP_PG_SQL_DIR}/"
+            )
+        clear_erp_staging(local_con)
+        insert_erp_staging_rows(local_con, sync_batch_id, workbook_data)
+        ps_inserted, ps_updated, ps_skipped = merge_erp_process_sheets(local_con, sync_batch_id)
+        mat_inserted, mat_updated, mat_skipped = merge_erp_materials(local_con, sync_batch_id)
+        flow_inserted, flow_updated, flow_skipped = merge_erp_bom_flows(local_con)
+        actual_inserted, actual_updated, actual_skipped = merge_erp_actuals(local_con, sync_batch_id)
+        backfill_erp_sync_locks(local_con)
+        summary = {
+            "process_sheets": {"inserted": ps_inserted, "updated": ps_updated, "skipped": ps_skipped},
+            "materials":      {"inserted": mat_inserted, "updated": mat_updated, "skipped": mat_skipped},
+            "flows":          {"inserted": flow_inserted, "updated": flow_updated, "skipped": flow_skipped},
+            "actuals":        {"inserted": actual_inserted, "updated": actual_updated, "skipped": actual_skipped},
+        }
+        total_inserted = ps_inserted + mat_inserted + flow_inserted + actual_inserted
+        total_updated = ps_updated + mat_updated + flow_updated + actual_updated
+        total_skipped = ps_skipped + mat_skipped + flow_skipped + actual_skipped
+        local_con.execute(
+            """
+            UPDATE erp_sync_log
+            SET status = 'SUCCESS', message = ?, inserted_count = ?, updated_count = ?, skipped_count = ?, completed_at = CURRENT_TIMESTAMP
+            WHERE sync_batch_id = ?
+            """,
+            (json.dumps(summary), total_inserted, total_updated, total_skipped, sync_batch_id),
+        )
+        return {"sync_batch_id": sync_batch_id, "summary": summary}
+    except Exception as exc:
+        local_con.execute(
+            """
+            UPDATE erp_sync_log
+            SET status = 'FAILED', message = ?, completed_at = CURRENT_TIMESTAMP
+            WHERE sync_batch_id = ?
+            """,
+            (str(exc), sync_batch_id),
+        )
+        raise
 
 
 def normalize_column_name(value):
@@ -6611,6 +6714,26 @@ def api_erp_sync_upload():
         except Exception as exc:
             con.rollback()
             return api_error(f"ERP sync failed: {exc}")
+
+
+@app.get("/api/integrations/erp/tables")
+def api_erp_pg_tables():
+    try:
+        tables = erp_pg_list_tables()
+        return jsonify({"success": True, "schema": ERP_PG_SCHEMA, "tables": tables})
+    except Exception as exc:
+        return api_error(f"Failed to list ERP tables: {exc}")
+
+
+@app.post("/api/erp-sync/pg")
+def api_erp_pg_sync():
+    with db() as local_con:
+        try:
+            result = run_erp_pg_sync(local_con)
+            return jsonify({"success": True, **result})
+        except Exception as exc:
+            local_con.rollback()
+            return api_error(f"ERP PostgreSQL sync failed: {exc}")
 
 
 @app.get("/api/machines")
