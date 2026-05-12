@@ -75,7 +75,7 @@ function renderProgramToolList(data) {
     html += `
       <tr>
         <td><strong>${row.ps_id}</strong><div style="font-size:11px;color:var(--text3)">Remaining ${fmt(row.remaining_qty || 0)}</div></td>
-        <td><strong>${row.part_name || '-'}</strong><div style="font-size:11px;color:var(--text3)">${row.inv_desc || ''}</div></td>
+        <td><strong>${row.part_name || '-'}</strong><div style="font-size:11px;color:var(--text3)">${row.part_desc || ''}</div></td>
         <td>${row.route_label || '-'}</td>
         <td>${row.expected_start || '-'}</td>
         <td>${row.program.need_by_date || '-'}</td>

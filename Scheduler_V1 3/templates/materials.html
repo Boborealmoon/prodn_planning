@@ -62,7 +62,7 @@ function render(data) {
     html += `
       <tr>
         <td><strong>${m.ps_id}</strong><div style="font-size:11px;color:var(--text3)">Planned ${fmt(m.planned_qty || 0)} | Remaining ${fmt(m.remaining_qty || 0)}</div></td>
-        <td><strong>${m.part_name || '-'}</strong><div style="font-size:11px;color:var(--text3)">${m.inv_desc || ''}</div></td>
+        <td><strong>${m.part_name || '-'}</strong><div style="font-size:11px;color:var(--text3)">${m.part_desc || ''}</div></td>
         <td>${m.material_name || '-'}</td>
         <td>${m.expected_start || '-'}</td>
         <td>${m.need_by_date || '-'}</td>

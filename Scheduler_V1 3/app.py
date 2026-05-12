@@ -39,10 +39,9 @@ except ImportError:  # pragma: no cover - optional dependency until ERP sync is 
 
 
 ROOT = Path(__file__).resolve().parent
-# Legacy scheduler database, retained only for old backup/transition screens.
-# Canonical production planning is served by TRIAL/trial_app against TRIAL/trial.db.
+# Canonical planner database lives at the repository root.
 DB_PATH = ROOT / "planner.db"
-TRIAL_DB_PATH = ROOT / "TRIAL" / "trial.db"
+TRIAL_DB_PATH = ROOT / "planner.db"
 if EMBEDDED_TRIAL_DB_PATH != TRIAL_DB_PATH:
     raise RuntimeError(f"Embedded trial DB path mismatch: {EMBEDDED_TRIAL_DB_PATH} != {TRIAL_DB_PATH}")
 ERP_DSN = os.environ.get("ERP_ODBC_DSN", "postgresql")
@@ -142,8 +141,7 @@ ERP_OPTIONAL_SHEET_ALIASES = {
 
 
 def db():
-    # Deprecated planner.db connection. New planning/scheduling APIs must use
-    # TRIAL/trial_app/db.py, which points at the embedded TRIAL/trial.db.
+    # Canonical planner.db connection used by the TRIAL scheduler.
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
@@ -6509,8 +6507,8 @@ def duplicate_flow(bom_id):
         return jsonify({"bom_id": cur.lastrowid, "flow_code": code})
 
 
-# Legacy planner.db route; do not use for new TRIAL/trial.db scheduler.
-# The TRIAL/trial.db implementation is registered earlier from
+# Legacy planner.db route; do not use for the TRIAL scheduler.
+# The TRIAL implementation is registered earlier from
 # TRIAL/trial_app/routes_process_sheets.py and wins for GET /api/process-sheets.
 @app.get("/api/process-sheets")
 def api_process_sheets():
@@ -6814,7 +6812,7 @@ def auto_plan_op(con, ps_id, op_seq_id):
     }
 
 
-# Legacy planner.db route; do not use for new TRIAL/trial.db scheduler.
+# Legacy planner.db route; do not use for the TRIAL scheduler.
 @app.post("/api/plan/auto/<ps_id>")
 def api_auto_plan(ps_id):
     with db() as con:
@@ -7362,7 +7360,7 @@ def legacy_trial_api_error():
 
 # Deprecated root-app trial endpoints. They are retained only as explicit
 # compatibility stubs so stale actual_good_qty/actual_reject_qty logic cannot
-# mutate the canonical TRIAL/trial.db daily actual rows.
+# mutate the canonical planner.db daily actual rows.
 @app.get("/api/legacy-trial/schedule")
 def api_trial_schedule():
     return redirect("/api/trial/schedule", code=308)
@@ -8916,7 +8914,7 @@ def _load_row_envelope(con, row_id):
     return row, envelope_rows
 
 
-# Legacy planner.db route; do not use for new TRIAL/trial.db scheduler.
+# Legacy planner.db route; do not use for the TRIAL scheduler.
 @app.post("/api/rows/<int:row_id>/lock")
 def lock_row_by_id(row_id):
     data = request.get_json() or {}
@@ -10282,14 +10280,8 @@ def api_history():
         return jsonify(rows(con.execute(sql, params)))
 
 if __name__ == "__main__":
-    # Legacy planner.db schema initialization for old backup/transition pages.
-    # The TRIAL scheduler now runs from TRIAL/trial.db, so we keep legacy
-    # startup best-effort and do not block the app if the old backup schema
-    # no longer matches the current code.
-    try:
-        ensure_db()
-    except sqlite3.OperationalError as exc:
-        print(f"Skipping legacy planner.db init: {exc}")
+    # planner.db is the canonical scheduler now.
+    # Keep startup focused on the TRIAL app only.
     if os.environ.get("APP_AUTO_RELOAD", "1") == "1":
         _start_dev_reload_watcher()
     app.run(debug=False, port=5000, use_reloader=False)

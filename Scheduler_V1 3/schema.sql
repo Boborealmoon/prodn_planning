@@ -1,10 +1,5 @@
 PRAGMA foreign_keys = ON;
 
--- Clean target schema for TRIAL/trial.db.
--- Canonical scheduler tables use non-prefixed names:
--- operation, run_block, run_block_segment, production_actual.
--- BOM/route tables use bom_variation and operation_seq.
-
 CREATE TABLE IF NOT EXISTS calendar_days (
   work_date TEXT PRIMARY KEY,
   is_working_day INTEGER NOT NULL DEFAULT 1,
@@ -285,7 +280,7 @@ CREATE TABLE IF NOT EXISTS planning_card_operation (
 
 CREATE VIEW IF NOT EXISTS flows AS
 SELECT
-  bom_id AS flow_id,
+  bom_id AS bom_id,
   part_id,
   bom_code AS flow_code,
   bom_desc AS flow_name,
@@ -294,8 +289,8 @@ FROM bom_variation;
 
 CREATE VIEW IF NOT EXISTS flow_steps AS
 SELECT
-  op_seq_id AS step_id,
-  bom_id AS flow_id,
+  op_seq_id AS op_seq_id,
+  bom_id AS bom_id,
   seq_no AS seq,
   seq_no,
   op_no,
@@ -311,9 +306,9 @@ CREATE VIEW IF NOT EXISTS process_sheets AS
 SELECT
   ps_id,
   part_id,
-  selected_bom_id AS selected_flow_id,
-  part_no AS inv_code,
-  part_desc AS inv_desc,
+  selected_bom_id AS selected_bom_id,
+  part_no AS part_no,
+  part_desc AS part_desc,
   order_date,
   due_date,
   total_qty,

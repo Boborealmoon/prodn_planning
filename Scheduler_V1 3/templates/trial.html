@@ -2062,8 +2062,8 @@ async function openTrialBOMEditor(psId) {
       flow_code: flow.flow_code || `FLOW-${flow.bom_id}`,
       is_default: !!flow.is_default,
       ps_id: ps.ps_id,
-      part_name: ps.part_name || ps.inv_code || '',
-      part_desc: ps.inv_desc || ps.part_desc || '',
+      part_name: ps.part_name || ps.part_no || '',
+      part_desc: ps.part_desc || ps.part_desc || '',
     };
     trialBOMEditing = (flow.steps || []).map(step => ({ ...step }));
     openModal('Edit BOM', `
@@ -2253,8 +2253,8 @@ function renderTrialCatalog() {
     const haystack = [
       ps.ps_id,
       ps.part_name,
-      ps.inv_code,
-      ps.inv_desc,
+      ps.part_no,
+      ps.part_desc,
       ps.due_date,
       ps.status,
       ps.planner_status,
@@ -2277,8 +2277,8 @@ function renderTrialCatalog() {
     const haystack = [
       ps.ps_id,
       ps.part_name,
-      ps.inv_code,
-      ps.inv_desc,
+      ps.part_no,
+      ps.part_desc,
       ps.due_date,
       ps.status,
       ps.planner_status,
@@ -2297,7 +2297,7 @@ function renderTrialCatalog() {
     const partialText = psIdParts[1] ? `Partial ${psIdParts[1]}` : '';
     const opCardsHtml = (ps.op_cards || []).map(card => renderTrialOpCardHtml(card)).join('');
     return `
-      <details class="trial-catalog-ps" ${rawQuery ? 'open' : ''} data-ps-id="${escapeHtml(ps.ps_id || '')}" data-base-ps-id="${escapeHtml(basePsId)}" data-partial-text="${escapeHtml(partialText)}" data-part-name="${escapeHtml(ps.part_name || '')}" data-inv-desc="${escapeHtml(ps.inv_desc || '')}" data-due-date="${escapeHtml(ps.due_date || '')}">
+      <details class="trial-catalog-ps" ${rawQuery ? 'open' : ''} data-ps-id="${escapeHtml(ps.ps_id || '')}" data-base-ps-id="${escapeHtml(basePsId)}" data-partial-text="${escapeHtml(partialText)}" data-part-name="${escapeHtml(ps.part_name || '')}" data-inv-desc="${escapeHtml(ps.part_desc || '')}" data-due-date="${escapeHtml(ps.due_date || '')}">
         <summary>
           <span>${escapeHtml(basePsId)}</span>
           <span class="trial-catalog-ps-meta trial-catalog-ps-date">${escapeHtml(ps.due_date || 'No due date')}</span>
@@ -2318,7 +2318,7 @@ function renderTrialCatalog() {
         <div class="trial-catalog-ps-main">
           <div class="trial-catalog-ps-id">${escapeHtml(String(ps.ps_id || '').split('::')[0] || ps.ps_id || '')}</div>
           <div class="trial-catalog-ps-part">${escapeHtml(ps.part_name || 'Part No')}</div>
-          ${ps.inv_desc ? `<div class="trial-catalog-ps-desc">${escapeHtml(ps.inv_desc)}</div>` : ''}
+          ${ps.part_desc ? `<div class="trial-catalog-ps-desc">${escapeHtml(ps.part_desc)}</div>` : ''}
         </div>
         <div class="trial-catalog-planned-right">
           <span class="trial-catalog-planned-badge">Planned</span>

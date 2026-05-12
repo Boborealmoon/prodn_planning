@@ -7,8 +7,8 @@ from pathlib import Path
 
 from .constants import CAPACITY_PROFILES, TRIAL_MACHINES
 
-TRIAL_DIR = Path(__file__).resolve().parents[1]
-DB_PATH = TRIAL_DIR / "trial.db"
+ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = ROOT / "planner.db"
 
 
 class RowMap(dict):

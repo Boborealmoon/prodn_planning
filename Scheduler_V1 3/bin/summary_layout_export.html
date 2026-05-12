@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Summary Layout Export</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f9f9fb;
+      --panel: rgba(255,255,255,0.82);
+      --line: rgba(26,28,29,0.08);
+      --text: #1a1c1d;
+      --text2: #474747;
+      --text3: #777777;
+      --accent: #3b3b3b;
+      --green: #4ade80;
+      --yellow: #fbbf24;
+      --red: #fb7185;
+      --shadow-sm: 0 14px 30px rgba(26,28,29,0.06);
+      --shadow-lg: 0 24px 60px rgba(26,28,29,0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 18% 10%, rgba(255,255,255,0.05), transparent 26%),
+        radial-gradient(circle at 82% 12%, rgba(255,255,255,0.03), transparent 22%),
+        var(--bg);
+      color: var(--text);
+      font-family: 'Manrope', sans-serif;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(255,255,255,0.72);
+      backdrop-filter: blur(28px);
+      border-bottom: 1px solid rgba(26,28,29,0.06);
+      box-shadow: 0 10px 40px rgba(26,28,29,0.04);
+    }
+    .topbar-inner {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .logo {
+      width: 42px; height: 42px; border-radius: 14px;
+      display: grid; place-items: center;
+      background: linear-gradient(135deg, rgba(59,59,59,0.10), rgba(94,94,94,0.06));
+      color: var(--text);
+      border: 1px solid rgba(26,28,29,0.10);
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+    .app-kicker { font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--text3); margin-bottom: 2px; }
+    .app-title { font-size: 18px; font-weight: 800; line-height: 1.1; }
+    .topnav { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; flex: 1; }
+    .topnav a, .dropdown-toggle {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 14px; border-radius: 999px;
+      color: var(--text2); text-decoration: none;
+      font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 800;
+      border: 1px solid transparent; background: transparent;
+    }
+    .topnav a.active, .dropdown.active > .dropdown-toggle {
+      background: linear-gradient(90deg, rgba(59,59,59,0.10), rgba(94,94,94,0.04));
+      color: var(--accent); border-color: rgba(26,28,29,0.12);
+    }
+    .topnav-separator { width: 1px; height: 24px; background: rgba(26,28,29,0.10); }
+    details.dropdown { position: relative; }
+    summary.dropdown-toggle { list-style: none; cursor: pointer; }
+    summary.dropdown-toggle::-webkit-details-marker { display: none; }
+    .caret { color: var(--text3); font-size: 10px; }
+    .dropdown-menu {
+      position: absolute; top: calc(100% + 10px); left: 0; min-width: 240px;
+      background: rgba(255,255,255,0.92); backdrop-filter: blur(26px);
+      border: 1px solid rgba(26,28,29,0.08); border-radius: 18px; padding: 8px;
+      box-shadow: var(--shadow-lg); display: grid; gap: 4px; z-index: 30;
+    }
+    .dropdown-label { display:block; padding: 8px 12px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text3); font-weight: 700; }
+    .dropdown-menu a { color: var(--text2); padding: 10px 12px; border-radius: 12px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 700; }
+    .dropdown-menu a:hover, .dropdown-menu a.active { background: rgba(26,28,29,0.04); color: var(--text); }
+    .page {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .page-header {
+      background: rgba(255,255,255,0.72);
+      backdrop-filter: blur(24px);
+      border: 1px solid rgba(26,28,29,0.06);
+      border-radius: 28px;
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .page-eyebrow { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text3); font-weight: 800; }
+    .page-header h1 { margin: 8px 0 0; font-size: 32px; line-height: 0.98; letter-spacing: -0.04em; }
+    .summary-toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .summary-group { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .summary-filter { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text3); }
+    .summary-filter input { min-width: 140px; }
+    .btn {
+      border: 1px solid rgba(26,28,29,0.08);
+      background: rgba(26,28,29,0.02);
+      color: var(--text2);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--text2));
+      color: #fff;
+      border: 0;
+    }
+    .range-segment {
+      display: inline-flex;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.03);
+      gap: 4px;
+      flex-wrap: wrap;
+      backdrop-filter: blur(16px);
+    }
+    .range-segment .btn { border: 0; background: transparent; color: var(--text2); }
+    .range-segment .btn.active { background: rgba(26,28,29,0.06); color: var(--text); }
+    .summary-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.9fr);
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow-sm);
+    }
+    .hero-main { min-height: 220px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
+    .summary-kicker { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text3); font-weight: 800; }
+    .summary-title { margin: 10px 0 8px; font-size: clamp(28px, 4vw, 52px); line-height: 0.98; letter-spacing: -0.04em; font-weight: 900; }
+    .summary-copy { max-width: 58ch; color: var(--text2); line-height: 1.6; }
+    .summary-chip-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .summary-chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--text2); font-size: 12px; font-weight: 700; }
+    .summary-chip strong { color: var(--text); }
+    .summary-aside { display: grid; gap: 16px; }
+    .summary-aside-card { padding: 22px; min-height: 101px; display: flex; flex-direction: column; justify-content: space-between; }
+    .summary-aside-card .label, .summary-kpi .label { font-size: 11px; color: var(--text3); margin-bottom: 6px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 800; }
+    .summary-aside-card .value { font-size: 34px; line-height: 1; font-weight: 900; letter-spacing: -0.04em; }
+    .summary-aside-card .sub, .summary-kpi .sub { margin-top: 4px; font-size: 12px; color: var(--text3); }
+    .summary-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .summary-kpi { padding: 18px; }
+    .summary-kpi .value { font-size: 26px; font-weight: 900; letter-spacing: -0.03em; margin-top: 8px; }
+    .table-wrap {
+      background: var(--panel);
+      backdrop-filter: blur(24px);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th {
+      background: rgba(26,28,29,0.03);
+      padding: 12px 14px;
+      text-align: left;
+      font-weight: 800;
+      color: var(--text2);
+      border-bottom: 1px solid rgba(26,28,29,0.08);
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 10px;
+    }
+    tbody tr { border-bottom: 1px solid rgba(26,28,29,0.06); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(26,28,29,0.03); }
+    tbody td { padding: 11px 14px; color: var(--text); vertical-align: middle; }
+    .machine-toggle { cursor: pointer; user-select: none; }
+    .metric-value { font-size: 12px; font-weight: 700; line-height: 1.1; }
+    .util-bar { height: 8px; background: rgba(26,28,29,0.08); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+    .util-fill { height: 100%; border-radius: 999px; }
+    .low { color: var(--red); }
+    .warn { color: var(--yellow); }
+    .ok { color: var(--green); }
+    .machine-detail-row td { padding-top: 0; border-top: 0; }
+    .machine-detail-panel {
+      margin: 0 0 10px 0;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.5);
+      overflow: hidden;
+    }
+    .machine-detail-panel table th, .machine-detail-panel table td {
+      padding: 8px 10px;
+      font-size: 12px;
+      border-bottom: 1px solid rgba(26,28,29,0.06);
+    }
+    .machine-detail-panel th { color: var(--text3); text-align: left; background: rgba(26,28,29,0.03); }
+    .footer-note { margin: 18px 0 0; color: var(--text3); font-size: 12px; }
+    @media (max-width: 900px) {
+      .summary-hero { grid-template-columns: 1fr; }
+      .page-header { flex-direction: column; align-items: flex-start; }
+    }
+    @media (max-width: 720px) {
+      .page { padding: 16px; }
+      .topbar-inner { padding: 14px 16px; }
+      .dropdown-menu { position: static; min-width: 100%; margin-top: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="logo">PP</div>
+        <div>
+          <div class="app-kicker">Production</div>
+          <div class="app-title">Production Planning</div>
+        </div>
+      </div>
+      <div class="topnav">
+        <a href="#" class="topnav-link">Process Sheets</a>
+        <a href="#" class="topnav-link">Machine Schedule</a>
+        <a href="#" class="topnav-link active">Summary</a>
+        <span class="topnav-separator"></span>
+        <details class="dropdown active" open>
+          <summary class="dropdown-toggle">Planning Data <span class="caret">▾</span></summary>
+          <div class="dropdown-menu">
+            <span class="dropdown-label">Inventory &amp; Planning</span>
+            <a href="#">Inventory BOM</a>
+            <a href="#">Program / Tool List</a>
+            <a href="#">Machines</a>
+            <a href="#">Materials</a>
+          </div>
+        </details>
+        <details class="dropdown">
+          <summary class="dropdown-toggle">Operations <span class="caret">▾</span></summary>
+          <div class="dropdown-menu">
+            <span class="dropdown-label">Planning Support</span>
+            <a href="#">Calendar</a>
+            <a href="#">Staff Management</a>
+          </div>
+        </details>
+        <details class="dropdown">
+          <summary class="dropdown-toggle">System <span class="caret">▾</span></summary>
+          <div class="dropdown-menu">
+            <span class="dropdown-label">Sync &amp; History</span>
+            <a href="#">Sync</a>
+            <a href="#">History</a>
+          </div>
+        </details>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <section class="page-header">
+      <div>
+        <div class="page-eyebrow">Production Planning</div>
+        <h1>Machine Performance Summary</h1>
+      </div>
+      <div class="summary-toolbar">
+        <div class="summary-group">
+          <div class="summary-filter">
+            <label>Range</label>
+            <div class="range-segment">
+              <button class="btn">Today</button>
+              <button class="btn active">7 Days</button>
+              <button class="btn">Month</button>
+              <button class="btn">30 Days</button>
+              <button class="btn">Custom</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-hero">
+      <div class="card hero-main">
+        <div>
+          <div class="summary-kicker">Operational Overview</div>
+          <div class="summary-title">Machine Performance Summary</div>
+          <div class="summary-copy">Compare utilization, completion, idle time, and next availability across the selected machine fleet window.</div>
+          <div class="summary-chip-row">
+            <div class="summary-chip"><strong>18</strong> machines</div>
+            <div class="summary-chip"><strong>50.0%</strong> avg utilization</div>
+            <div class="summary-chip"><strong>2026-04-21</strong> to <strong>2026-04-27</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="summary-aside">
+        <div class="card summary-aside-card">
+          <div class="label">Most Loaded</div>
+          <div class="value">CNC 38</div>
+          <div class="sub">50.0% used</div>
+        </div>
+        <div class="card summary-aside-card">
+          <div class="label">Focus</div>
+          <div class="value" style="font-size:28px">Healthy</div>
+          <div class="sub">Use the detail view to inspect the busiest lane</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-kpi-grid">
+      <div class="card summary-kpi"><div class="label">Machines</div><div class="value">18</div><div class="sub">In the selected range</div></div>
+      <div class="card summary-kpi"><div class="label">Avg Utilization</div><div class="value">50.0%</div><div class="sub">Scheduled over available time</div></div>
+      <div class="card summary-kpi"><div class="label">Scheduled Hours</div><div class="value">31.5</div><div class="sub">Across the selected range</div></div>
+      <div class="card summary-kpi"><div class="label">Idle Hours</div><div class="value">31.5</div><div class="sub">Unused available time</div></div>
+      <div class="card summary-kpi"><div class="label">Schedule Completion</div><div class="value">100.0%</div><div class="sub">Actual output vs scheduled qty</div></div>
+      <div class="card summary-kpi"><div class="label">Order Completion</div><div class="value">94.4%</div><div class="sub">Actual output vs original order qty</div></div>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Machine</th><th>Category</th><th>Shift</th><th>PS Count</th>
+            <th>Scheduled Hrs</th><th>Available Hrs</th><th>Utilization</th><th>Idle Hrs</th>
+            <th>Schedule Completion</th><th>Order Completion</th><th>Next Available</th><th>Focus</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="machine-toggle"><strong>CNC 38</strong> <span style="color:var(--text3);font-size:11px">▼</span></td>
+            <td>TURNMILL</td>
+            <td>STANDARD</td>
+            <td style="text-align:right">4</td>
+            <td style="text-align:right">21.5</td>
+            <td style="text-align:right">63.0</td>
+            <td>
+              <div class="metric-value warn">34.1%</div>
+              <div class="util-bar"><div class="util-fill" style="width:34.1%;background:var(--yellow)"></div></div>
+            </td>
+            <td style="text-align:right">41.5</td>
+            <td>
+              <div class="metric-value ok">100.0%</div>
+              <div class="util-bar"><div class="util-fill" style="width:100%;background:var(--green)"></div></div>
+            </td>
+            <td>
+              <div class="metric-value warn">94.4%</div>
+              <div class="util-bar"><div class="util-fill" style="width:94.4%;background:var(--yellow)"></div></div>
+            </td>
+            <td style="font-size:12px">2026-04-24 08:30</td>
+            <td><span class="warn">Underused</span></td>
+          </tr>
+          <tr class="machine-detail-row">
+            <td colspan="12">
+              <div class="machine-detail-panel">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>PS / Sheet</th><th>Op</th><th>Start Time</th><th>End Time</th><th>Total Qty</th><th>Planned Qty</th><th>Actual Qty Out</th><th>Schedule Completion</th><th>Order Completion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>NPS26-0075</strong><div style="font-size:11px;color:var(--text3)">NPS26-0075::1</div></td>
+                      <td>Turnmill 40</td>
+                      <td>2026-04-22 08:30</td>
+                      <td>2026-04-22 18:30</td>
+                      <td style="text-align:right">6</td>
+                      <td style="text-align:right">3</td>
+                      <td style="text-align:right">4</td>
+                      <td>
+                        <div class="metric-value warn">133.3%</div>
+                        <div class="util-bar"><div class="util-fill" style="width:100%;background:var(--yellow)"></div></div>
+                      </td>
+                      <td>
+                        <div class="metric-value warn">66.7%</div>
+                        <div class="util-bar"><div class="util-fill" style="width:66.7%;background:var(--yellow)"></div></div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>NPS26-0071</strong><div style="font-size:11px;color:var(--text3)">NPS26-0071::1</div></td>
+                      <td>Turnmill 20</td>
+                      <td>2026-04-23 08:30</td>
+                      <td>2026-04-23 10:55</td>
+                      <td style="text-align:right">1</td>
+                      <td style="text-align:right">1</td>
+                      <td style="text-align:right">1</td>
+                      <td>
+                        <div class="metric-value ok">100.0%</div>
+                        <div class="util-bar"><div class="util-fill" style="width:100%;background:var(--green)"></div></div>
+                      </td>
+                      <td>
+                        <div class="metric-value ok">100.0%</div>
+                        <div class="util-bar"><div class="util-fill" style="width:100%;background:var(--green)"></div></div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><strong>NPS26-0073</strong><div style="font-size:11px;color:var(--text3)">NPS26-0073::1</div></td>
+                      <td>Turnmill 20</td>
+                      <td>2026-04-23 10:55</td>
+                      <td>2026-04-23 11:45</td>
+                      <td style="text-align:right">2</td>
+                      <td style="text-align:right">2</td>
+                      <td style="text-align:right">2</td>
+                      <td>
+                        <div class="metric-value ok">100.0%</div>
+                        <div class="util-bar"><div class="util-fill" style="width:100%;background:var(--green)"></div></div>
+                      </td>
+                      <td>
+                        <div class="metric-value ok">100.0%</div>
+                        <div class="util-bar"><div class="util-fill" style="width:100%;background:var(--green)"></div></div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="footer-note">Static export of the current Summary tab layout, built for visual reference.</div>
+  </main>
+</body>
+</html>

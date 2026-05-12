@@ -4,7 +4,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parents[1] / "TRIAL" / "trial.db"
+DB_PATH = Path(__file__).resolve().parents[1] / "planner.db"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB_PATH = ROOT / "TRIAL" / "trial.db"
+DEFAULT_DB_PATH = ROOT / "planner.db"
 
 
 TABLE_RENAMES = [
@@ -444,7 +444,7 @@ def migrate(con: sqlite3.Connection, dry_run: bool) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Migrate TRIAL/trial.db to the new non-prefixed schema."
+        description="Migrate planner.db to the new non-prefixed schema."
     )
     parser.add_argument(
         "--db",

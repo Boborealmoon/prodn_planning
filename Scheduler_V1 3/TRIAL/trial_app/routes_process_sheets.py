@@ -288,7 +288,7 @@ def _flow_options(con, part_id):
         for row in rows(
             con.execute(
                 """
-                SELECT bom_id, flow_code, flow_name, is_default
+                SELECT bom_id, bom_code AS flow_code, bom_desc AS flow_name, is_default
                 FROM bom_variation
                 WHERE part_id = ?
                 ORDER BY is_default DESC, bom_id
@@ -309,7 +309,7 @@ def list_process_sheets_payload(con):
     ps_rows = [dict(row) for row in rows(
         con.execute(
             """
-            SELECT ps.*, p.part_name, sf.flow_code AS selected_flow_code
+            SELECT ps.*, p.part_no AS part_name, p.part_desc AS part_desc, sf.bom_code AS selected_flow_code, sf.bom_desc AS selected_flow_name
             FROM process_sheet ps
             LEFT JOIN parts p ON p.part_id = ps.part_id
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
@@ -379,7 +379,7 @@ def api_process_sheet_details(ps_id):
         ps = one(
             con.execute(
                 """
-                SELECT ps.*, p.part_name, sf.flow_code AS selected_flow_code, sf.flow_name AS selected_flow_name
+                SELECT ps.*, p.part_no AS part_name, p.part_desc AS part_desc, sf.bom_code AS selected_flow_code, sf.bom_desc AS selected_flow_name
                 FROM process_sheet ps
                 LEFT JOIN parts p ON p.part_id = ps.part_id
                 LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
@@ -422,7 +422,7 @@ def api_process_sheet_details(ps_id):
                 """
                 SELECT a.actual_id, a.segment_id, a.block_id, a.report_date,
                        a.output_qty, a.reject_qty, a.target_qty_at_report,
-                       a.remarks, a.reported_by, a.reported_at,
+                       a.remarks, a.reported_at,
                        o.source_op_seq_id, o.source_op_no
                 FROM production_actual a
                 JOIN run_block b ON b.block_id = a.block_id
@@ -445,7 +445,7 @@ def api_process_sheet_details(ps_id):
             con.execute(
                 """
                 SELECT *
-                FROM trial_planning_card
+                FROM planning_card
                 WHERE ps_id = ?
                 ORDER BY card_id
                 """,

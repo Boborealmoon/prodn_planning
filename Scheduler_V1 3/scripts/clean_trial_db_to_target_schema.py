@@ -11,7 +11,7 @@ from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd()
-DEFAULT_DB_PATH = ROOT / "TRIAL" / "trial.db"
+DEFAULT_DB_PATH = ROOT / "planner.db"
 
 
 TARGET_DDL = r"""
@@ -870,8 +870,8 @@ def replace_original(db_path: Path, clean_path: Path) -> Path:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Rebuild messy TRIAL/trial.db into the clean target schema.")
-    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="Input SQLite DB. Default: TRIAL/trial.db")
+    parser = argparse.ArgumentParser(description="Rebuild messy planner.db into the clean target schema.")
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="Input SQLite DB. Default: planner.db")
     parser.add_argument("--output", type=Path, default=None, help="Write clean DB here. If omitted with --replace, overwrites --db after backup.")
     parser.add_argument("--execute", action="store_true", help="Actually write the clean DB. Default is dry-run.")
     parser.add_argument("--replace", action="store_true", help="Replace --db with the clean DB after creating a backup.")

@@ -46,7 +46,7 @@ def _ps_requirement_context(con, ps_id):
         con.execute(
             """
             SELECT ps.*,
-                   sf.flow_code AS selected_flow_code
+                   sf.bom_code AS selected_flow_code
             FROM process_sheet ps
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
             WHERE ps.ps_id = ?
@@ -249,7 +249,7 @@ def material_requirement_rows_for_ps(con, ps_id):
     ps = one(
         con.execute(
             """
-            SELECT ps.ps_id, sf.flow_code AS selected_flow_code
+            SELECT ps.ps_id, sf.bom_code AS selected_flow_code
             FROM process_sheet ps
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
             WHERE ps.ps_id = ?
@@ -446,14 +446,14 @@ def _requirement_join_rows(con):
                    ps.status AS ps_status,
                    ps.planner_status,
                    ps.selected_bom_id,
-                   sf.flow_code AS selected_flow_code,
-                   p.part_no,
-                   p.part_desc
+                   sf.bom_code AS selected_flow_code,
+                   p.part_no AS part_name,
+                   p.part_desc AS part_desc
             FROM material_requirement mr
             JOIN process_sheet ps ON ps.ps_id = mr.ps_id
             LEFT JOIN parts p ON p.part_id = ps.part_id
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
-            WHERE COALESCE(sf.flow_code, '') = '' OR mr.bom_code = sf.flow_code
+            WHERE COALESCE(sf.bom_code, '') = '' OR mr.bom_code = sf.bom_code
             ORDER BY ps.due_date, ps.ps_id, mr.requirement_id
             """
         )

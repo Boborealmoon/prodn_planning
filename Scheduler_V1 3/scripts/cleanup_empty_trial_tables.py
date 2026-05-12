@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = ROOT / "TRIAL" / "trial.db"
+DEFAULT_DB_PATH = ROOT / "planner.db"
 
 REQUIRED_TABLES = {
     "machines",

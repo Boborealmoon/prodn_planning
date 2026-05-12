@@ -29,7 +29,7 @@ def trial_catalog_items(con, include_completed=False):
         con.execute(
             """
             SELECT ps.ps_id, ps.part_id, ps.part_no AS part_no, ps.part_desc AS part_desc, ps.due_date, ps.total_qty, ps.status, ps.planner_status, ps.selected_bom_id AS selected_bom_id,
-                   sf.flow_code AS selected_bom_code,
+                   sf.bom_code AS selected_bom_code,
                    p.part_no AS part_name, pfs.op_seq_id AS op_seq_id, pfs.seq_no, pfs.op_no, pfs.op_type, pfs.machine_category, pfs.preferred_machine,
                    pfs.cycle_time, pfs.setup_time, pfs.is_last_op
             FROM process_sheet ps
@@ -121,7 +121,7 @@ def trial_catalog_items(con, include_completed=False):
         if part_id not in flow_cache:
             flow_cache[part_id] = [dict(flow) for flow in rows(con.execute(
                 """
-                SELECT bom_id AS bom_id, flow_code AS bom_code, flow_name AS bom_desc, is_default
+                SELECT bom_id AS bom_id, bom_code AS bom_code, bom_desc AS bom_desc, is_default
                 FROM bom_variation
                 WHERE part_id = ?
                 ORDER BY is_default DESC, bom_id
