@@ -1,0 +1,2232 @@
+{% extends "base.html" %}
+{% block title %}Gantt{% endblock %}
+{% block page_title %}
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Production</span>
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Schedule.</span>
+{% endblock %}
+{% block page_actions %}
+<div class="gantt-actions">
+  <div class="gantt-filter-block">
+    <div class="gantt-filter-label">Range</div>
+    <div class="gantt-range-row">
+      <div class="gantt-chip-group">
+        <button class="btn btn-ghost btn-sm" onclick="shiftDays(-7)">Prev 7d</button>
+        <button class="btn btn-ghost btn-sm" onclick="shiftDays(-1)">Prev 1d</button>
+      </div>
+      <span id="gantt-range-label" class="gantt-date-chip"></span>
+      <div class="gantt-chip-group">
+        <button class="btn btn-ghost btn-sm" onclick="shiftDays(1)">Next 1d</button>
+        <button class="btn btn-ghost btn-sm" onclick="shiftDays(7)">Next 7d</button>
+        <button class="btn btn-ghost btn-sm" onclick="goToday()">Today</button>
+      </div>
+      <select id="gantt-days" class="gantt-select" onchange="loadGantt()">
+        <option value="7" selected>7 days</option>
+        <option value="14">14 days</option>
+        <option value="5">5 days</option>
+      </select>
+      <button class="btn btn-warning btn-sm" id="gantt-undo-btn" onclick="undoLastGanttMove()" disabled title="Legacy row moves are disabled on the TRIAL Gantt">Undo Move</button>
+    </div>
+  </div>
+  <div class="gantt-filter-block">
+    <div class="gantt-filter-label">Machine Type</div>
+    <div id="gantt-machine-chips" class="chip-row"></div>
+    <div class="gantt-filter-hint">Tap a chip to focus the schedule on one machine type.</div>
+  </div>
+</div>
+{% endblock %}
+{% block content %}
+<style>
+  .gantt-actions {
+    display: grid;
+    gap: 14px;
+    min-width: min(100%, 760px);
+  }
+  .gantt-filter-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: rgba(255,255,255,0.56);
+    box-shadow: var(--shadow-sm);
+  }
+  .gantt-filter-label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text3);
+    font-weight: 800;
+  }
+  .gantt-range-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .gantt-chip-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    background: rgba(255,255,255,0.76);
+    border: 1px solid rgba(26,28,29,0.08);
+    border-radius: 18px;
+    box-shadow: 0 10px 22px rgba(26,28,29,0.05);
+  }
+  .gantt-date-chip,
+  .gantt-select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 180px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.76);
+    border: 1px solid rgba(26,28,29,0.08);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.05);
+    font-size: 13px;
+    color: var(--text2);
+    font-weight: 700;
+  }
+  .gantt-select {
+    min-width: 120px;
+    appearance: none;
+  }
+  .gantt-filter-hint {
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.4;
+  }
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.72);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.04);
+    color: var(--text2);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .chip.active {
+    background: rgba(59,59,59,0.10);
+    color: var(--text);
+    border-color: rgba(26,28,29,0.12);
+  }
+  .gantt-page-shell {
+    display: grid;
+    gap: 14px;
+  }
+  #gantt-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 0 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    margin-bottom: 2px;
+  }
+  #gantt-legend > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(26, 28, 29, 0.06);
+    box-shadow: 0 10px 22px rgba(26, 28, 29, 0.04);
+  }
+  #gantt-legend span span {
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 3px !important;
+  }
+  #gantt-container {
+    overflow: auto;
+    max-height: calc(100vh - 220px);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: var(--bg2);
+    width: 100%;
+    box-shadow: var(--shadow-lg);
+    scrollbar-gutter: stable both-edges;
+  }
+  #gantt-container > div:first-child {
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    backdrop-filter: blur(18px);
+  }
+  #gantt-container .gantt-day-row > div {
+    transition: background 0.16s ease, box-shadow 0.16s ease;
+  }
+  #gantt-container .gantt-day-row:hover > div {
+    background: rgba(255, 255, 255, 0.35) !important;
+  }
+  #gantt-container .gantt-block {
+    border-radius: 14px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14) !important;
+    padding: 10px 12px !important;
+    font-size: 11px !important;
+    letter-spacing: -0.01em;
+    backdrop-filter: blur(12px);
+  }
+  #gantt-container .gantt-block:hover {
+    transform: translateY(-1px);
+    opacity: 0.98;
+    z-index: 8;
+  }
+  #gantt-container .gantt-block > div {
+    line-height: 1.25;
+  }
+  #gantt-container .gantt-block.segment-setup {
+    color: var(--text2) !important;
+    background: rgba(100, 116, 139, 0.35) !important;
+    border-style: dashed !important;
+  }
+  #gantt-container .gantt-block.segment-rework {
+    background: rgba(239, 68, 68, 0.82) !important;
+    border-color: rgba(239, 68, 68, 1) !important;
+  }
+  #gantt-container .gantt-setup-overlay,
+  #gantt-container .gantt-split-overlay {
+    border-radius: inherit;
+  }
+  #gantt-container .loading {
+    padding: 56px;
+    background: transparent;
+  }
+  .page-header {
+    align-items: flex-end;
+  }
+  .page-header-copy h1 {
+    font-size: 32px;
+  }
+  @media (max-width: 900px) {
+    .page-header {
+      align-items: flex-start;
+    }
+    .gantt-toolbar {
+      justify-items: start;
+      width: 100%;
+    }
+    .gantt-toolbar-row {
+      justify-content: flex-start;
+    }
+  }
+</style>
+<div class="gantt-page-shell">
+<div id="gantt-legend">
+  <span><span style="background:rgba(59,130,246,0.72);border:1px solid rgba(59,130,246,0.95);"></span> Planned production</span>
+  <span><span style="background:rgba(100,116,139,0.55);border:1px dashed rgba(100,116,139,0.9);"></span> Setup</span>
+  <span><span style="background:rgba(34,197,94,0.78);border:1px solid rgba(34,197,94,1);"></span> Actual reported</span>
+  <span><span style="background:rgba(16,185,129,0.88);border:1px solid rgba(16,185,129,1);"></span> Completed</span>
+  <span><span style="background:rgba(239,68,68,0.82);"></span> Rework</span>
+  <span><span style="background:rgba(100,116,139,0.15);border:1px solid var(--border);"></span> Off hours / non-working</span>
+  <span style="margin-left:auto;color:var(--text3);background:transparent;border:none;">Click block for details</span>
+</div>
+<div id="gantt-container">
+  <div class="loading"><div class="spinner"></div> Loading Gantt...</div>
+</div>
+</div>
+
+<!-- Block detail panel -->
+<div id="block-detail" style="display:none;position:fixed;bottom:20px;right:20px;width:350px;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;z-index:200;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+  <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+    <strong id="bd-title">Envelope Details</strong>
+    <button onclick="document.getElementById('block-detail').style.display='none'" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px">✕</button>
+  </div>
+  <div id="bd-body" style="padding:14px 16px;font-size:13px"></div>
+</div>
+
+<div id="gantt-split-tooltip" style="display:none;position:fixed;z-index:320;pointer-events:none;max-width:280px;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;background:rgba(15,23,42,0.96);color:var(--text);box-shadow:0 10px 28px rgba(0,0,0,0.35);font-size:12px;line-height:1.35"></div>
+<div id="gantt-context-menu" style="display:none;position:fixed;z-index:330;min-width:160px;padding:6px;background:rgba(15,23,42,0.98);border:1px solid var(--border2);border-radius:8px;box-shadow:0 12px 30px rgba(0,0,0,0.35);color:var(--text);font-size:12px">
+  <button type="button" id="gantt-context-split" style="width:100%;text-align:left;padding:8px 10px;border:none;background:transparent;color:inherit;border-radius:6px;cursor:pointer">Split here</button>
+</div>
+
+<div id="gantt-move-modal" style="display:none;position:fixed;inset:0;background:rgba(2,6,23,0.72);z-index:260;align-items:center;justify-content:center;padding:20px">
+  <div style="width:min(420px, 100%);background:var(--bg2);border:1px solid var(--border2);border-radius:10px;box-shadow:0 18px 40px rgba(0,0,0,0.35)">
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <strong>Move Operation</strong>
+      <button type="button" onclick="closeGanttMoveModal()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;line-height:1">x</button>
+    </div>
+    <div style="padding:16px;display:grid;gap:14px">
+      <div id="gantt-move-summary" style="font-size:12px;color:var(--text2)"></div>
+      <label style="display:grid;gap:6px">
+        <span class="field-hint">New Date</span>
+        <input id="gantt-move-date" type="date" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px">
+      </label>
+      <label style="display:grid;gap:6px">
+        <span class="field-hint">New Start Time</span>
+        <input id="gantt-move-time" type="time" step="60" min="08:30" max="20:00" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px">
+      </label>
+      <div style="font-size:12px;color:var(--text3)">Pick the day from the calendar, then adjust the start time. The current move rules still apply.</div>
+    </div>
+    <div style="padding:14px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+      <button type="button" class="btn btn-ghost" onclick="closeGanttMoveModal()">Cancel</button>
+      <button type="button" class="btn btn-warning" onclick="submitGanttMoveModal()">Move</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Gantt configuration
+const STANDARD_WINDOWS = [[510, 720], [765, 960], [975, 1200]];
+const BREAKS = [[720, 765], [960, 975]];
+const DAY_START = 480;   // 08:00 display start
+const DAY_END = 1230;    // 20:30 display end
+const DAY_MINS = DAY_END - DAY_START;
+const PIXELS_PER_MIN = 1.2;
+const ROW_HEIGHT = DAY_MINS * PIXELS_PER_MIN;
+
+function localISODate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+let fromDate = localISODate();
+let lastGanttMove = null;
+let selectedGanttBlock = null;
+let selectedGanttRowId = null;
+let selectedGanttEnvelopeRowIds = [];
+let pendingGanttMove = null;
+let ganttSplitTooltip = null;
+let ganttContextMenu = null;
+let ganttContextTarget = null;
+let ganttSelectedMachineType = 'all';
+let ganttLastMachines = [];
+let ganttHorizontalScrollBound = false;
+
+function bindGanttHorizontalScroll() {
+  const container = document.getElementById('gantt-container');
+  if (!container || ganttHorizontalScrollBound) return;
+  container.addEventListener('wheel', (event) => {
+    const canScrollHorizontally = container.scrollWidth > container.clientWidth + 1;
+    if (!canScrollHorizontally) return;
+    const horizontalIntent = event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY);
+    if (!horizontalIntent) return;
+    event.preventDefault();
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    container.scrollLeft += delta;
+  }, { passive: false });
+  ganttHorizontalScrollBound = true;
+}
+
+function psLabel(block) {
+  const base = String((block && (block.source_ps_id || block.ps_id)) || '').trim();
+  const partial = String(block && block.pp_partial_no != null ? block.pp_partial_no : '1').trim();
+  if (!base) return String((block && block.ps_id) || '').trim();
+  return partial && partial !== '1' ? `${base} P${partial}` : base;
+}
+
+function intOrBlank(value, actualOutSet) {
+  if (!actualOutSet && !value) return '';
+  const num = Number(value || 0);
+  return Number.isFinite(num) ? String(num) : '';
+}
+
+function escapeJs(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/</g, '\\x3C')
+    .replace(/>/g, '\\x3E');
+}
+
+function ganttSplitText(parts, totalQty) {
+  const cleanParts = (parts || [])
+    .map(v => Number(v || 0))
+    .filter(v => Number.isFinite(v) && v > 0);
+  if (!cleanParts.length) return '';
+  const label = cleanParts.map(v => `${fmt(v)}u`).join(' + ');
+  const total = Number(totalQty || 0);
+  return total > 0 ? `Split: ${label} | Total: ${fmt(total)}u` : `Split: ${label}`;
+}
+
+function ganttSplitGuide(parts) {
+  const cleanParts = (parts || [])
+    .map(v => Number(v || 0))
+    .filter(v => Number.isFinite(v) && v > 0);
+  if (!cleanParts.length) return null;
+  if (cleanParts.length >= 2) {
+    const top = cleanParts[0];
+    const bottom = cleanParts.slice(1).reduce((sum, v) => sum + v, 0);
+    if (bottom <= 0) return null;
+    return {
+      top,
+      bottom,
+      topText: `${fmt(top)}u`,
+      bottomText: `${fmt(bottom)}u`,
+      isSynthetic: false,
+    };
+  }
+  const total = cleanParts[0] || 0;
+  if (total <= 1) return null;
+  const top = Math.max(1, Math.floor(total * 0.7));
+  const bottom = total - top;
+  if (bottom <= 0) return null;
+  return {
+    top,
+    bottom,
+    topText: `${fmt(top)}u`,
+    bottomText: `${fmt(bottom)}u`,
+    isSynthetic: true,
+  };
+}
+
+function ganttSplitTargetRowId(blockEl) {
+  const parts = String(blockEl?.dataset?.envelopeParts || blockEl?.dataset?.splitParts || '')
+    .split(',')
+    .map(v => Number(v))
+    .filter(v => Number.isFinite(v) && v > 0);
+  const rowIds = String(blockEl?.dataset?.envelopeRowIds || blockEl?.dataset?.splitRowIds || '')
+    .split(',')
+    .map(v => Number(v))
+    .filter(v => Number.isFinite(v) && v > 0);
+  const topQty = Number(blockEl?.dataset?.hoverSplitTopQty || 0);
+  if (!parts.length || !rowIds.length || topQty <= 0) return 0;
+  let cumulative = 0;
+  for (let i = 0; i < parts.length; i += 1) {
+    cumulative += parts[i];
+    if (cumulative > topQty + 1e-9) {
+      return rowIds[Math.min(i, rowIds.length - 1)] || 0;
+    }
+  }
+  return 0;
+}
+
+function ganttMinuteToPx(minute, rect, startMin, endMin) {
+  const span = Math.max(1, Number(endMin || 0) - Number(startMin || 0));
+  const ratio = Math.min(1, Math.max(0, (Number(minute || 0) - startMin) / span));
+  return ratio * rect.height;
+}
+
+function ganttBuildVisibleSegments(blockEl, rect, setupHeight) {
+  const startMin = Number(blockEl.dataset.start || 0);
+  const endMin = Number(blockEl.dataset.end || 0);
+  const totalHeight = Math.max(1, rect.height);
+  const zoneStart = Math.min(totalHeight, Math.max(0, setupHeight));
+  const segments = [];
+  let cursor = zoneStart;
+  const breakRanges = BREAKS
+    .map(([breakStart, breakEnd]) => {
+      const overlapStart = Math.max(startMin, breakStart);
+      const overlapEnd = Math.min(endMin, breakEnd);
+      if (overlapEnd <= overlapStart) return null;
+      const pxStart = ganttMinuteToPx(overlapStart, rect, startMin, endMin);
+      const pxEnd = ganttMinuteToPx(overlapEnd, rect, startMin, endMin);
+      return [pxStart, pxEnd];
+    })
+    .filter(Boolean)
+    .sort((a, b) => a[0] - b[0]);
+
+  for (const [breakStartPx, breakEndPx] of breakRanges) {
+    const segStart = Math.max(zoneStart, cursor);
+    const segEnd = Math.max(segStart, Math.min(totalHeight, breakStartPx));
+    if (segEnd > segStart + 0.5) segments.push([segStart, segEnd]);
+    cursor = Math.max(cursor, breakEndPx);
+  }
+  if (cursor < totalHeight - 0.5) {
+    segments.push([Math.max(zoneStart, cursor), totalHeight]);
+  }
+  return segments.filter(([s, e]) => e > s + 0.5);
+}
+
+function ganttVisiblePosForY(y, segments) {
+  let visible = 0;
+  for (const [start, end] of segments) {
+    if (y < start) return visible;
+    if (y <= end) return visible + (y - start);
+    visible += (end - start);
+  }
+  return visible;
+}
+
+function ganttYForVisiblePos(pos, segments) {
+  let visible = 0;
+  for (const [start, end] of segments) {
+    const segLen = end - start;
+    if (pos <= visible + segLen) return start + (pos - visible);
+    visible += segLen;
+  }
+  return segments.length ? segments[segments.length - 1][1] : 0;
+}
+
+function clearGanttSplitState(blockEl, overlay) {
+  if (blockEl) {
+    blockEl.dataset.hoverSplitTopQty = '';
+    blockEl.dataset.hoverSplitBottomQty = '';
+    blockEl.dataset.hoverSplitLineY = '';
+  }
+  if (!overlay) return;
+  const line = overlay.querySelector('.gantt-split-line');
+  const topLabel = overlay.querySelector('.gantt-split-top');
+  const bottomLabel = overlay.querySelector('.gantt-split-bottom');
+  const timeLabel = overlay.querySelector('.gantt-split-time');
+  if (line) line.style.display = 'none';
+  if (topLabel) topLabel.style.display = 'none';
+  if (bottomLabel) bottomLabel.style.display = 'none';
+  if (timeLabel) timeLabel.style.display = 'none';
+}
+
+function updateGanttSplitOverlay(blockEl, overlay, clientY) {
+  if (!blockEl || !overlay) return;
+  const rect = blockEl.getBoundingClientRect();
+  const h = Math.max(1, rect.height);
+  const startMin = Math.max(0, Number(blockEl.dataset.start || 0));
+  const endMin = Math.max(startMin, Number(blockEl.dataset.end || 0));
+  const spanMins = Math.max(1, endMin - startMin);
+  const dayQty = Math.max(0, Number(blockEl.dataset.splitTotal || 0));
+  const envTotal = Math.max(dayQty, Number(blockEl.dataset.envelopeTotal || 0) || dayQty);
+  const envBefore = Math.max(0, Number(blockEl.dataset.envelopeBefore || 0));
+  const setupMins = Math.max(0, Number(blockEl.dataset.setupMins || 0));
+  if (dayQty <= 1) return false;
+  const setupRatio = Math.min(0.95, Math.max(0, setupMins / Math.max(1, Number(blockEl.dataset.totalSpanMins || h))));
+  const setupHeight = Math.min(h * 0.85, Math.max(0, h * setupRatio));
+  const rawY = Math.min(rect.bottom - 1, Math.max(rect.top, clientY));
+  const localY = rawY - rect.top;
+  const segments = ganttBuildVisibleSegments(blockEl, rect, setupHeight);
+  if (!segments.length) {
+    clearGanttSplitState(blockEl, overlay);
+    return false;
+  }
+  if (localY < segments[0][0] + 2 || localY > segments[segments.length - 1][1] + 2) {
+    clearGanttSplitState(blockEl, overlay);
+    return false;
+  }
+  const visibleTotal = segments.reduce((sum, [start, end]) => sum + (end - start), 0);
+  const cursorVisible = ganttVisiblePosForY(localY, segments);
+  const rawRatio = Math.min(0.999, Math.max(0.001, cursorVisible / Math.max(1, visibleTotal)));
+  let candidateDayQty;
+  if (cursorVisible <= 4 && envBefore > 0) {
+    candidateDayQty = 0;
+  } else if (cursorVisible >= visibleTotal - 4) {
+    candidateDayQty = dayQty;
+  } else {
+    candidateDayQty = Math.min(dayQty - 1, Math.max(1, Math.round(rawRatio * dayQty)));
+  }
+  const candidateVisible = (candidateDayQty / dayQty) * visibleTotal;
+  const candidateRel = ganttYForVisiblePos(candidateVisible, segments);
+  const topQty = Math.max(0, Math.min(envTotal, envBefore + candidateDayQty));
+  const bottomQty = Math.max(0, envTotal - topQty);
+  const lineY = Math.round(candidateRel);
+  blockEl.dataset.hoverSplitTopQty = String(topQty);
+  blockEl.dataset.hoverSplitBottomQty = String(bottomQty);
+  blockEl.dataset.hoverSplitLineY = String(lineY);
+  const topLabel = overlay.querySelector('.gantt-split-top');
+  const bottomLabel = overlay.querySelector('.gantt-split-bottom');
+  const timeLabel = overlay.querySelector('.gantt-split-time');
+  const line = overlay.querySelector('.gantt-split-line');
+  if (line) {
+    line.style.top = `${lineY}px`;
+    line.style.display = 'block';
+  }
+  if (topLabel) {
+    topLabel.textContent = `${fmt(topQty)}u`;
+    topLabel.style.top = `${Math.max(2, lineY - 24)}px`;
+    topLabel.style.display = 'block';
+  }
+  if (bottomLabel) {
+    bottomLabel.textContent = `${fmt(bottomQty)}u`;
+    bottomLabel.style.top = `${Math.min(Math.max(18, lineY + 6), h - 18)}px`;
+    bottomLabel.style.display = 'block';
+  }
+  if (timeLabel) {
+    const cutMin = Math.max(startMin, Math.min(endMin, Math.round(startMin + ((lineY / h) * spanMins))));
+    timeLabel.textContent = minToHHMM(cutMin);
+    timeLabel.style.top = `${Math.min(Math.max(2, lineY - 11), h - 18)}px`;
+    timeLabel.style.display = 'block';
+  }
+  return true;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function showGanttSplitTooltip(html, x, y) {
+  const tip = ganttSplitTooltip || document.getElementById('gantt-split-tooltip');
+  if (!tip) return;
+  ganttSplitTooltip = tip;
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  moveGanttSplitTooltip(x, y);
+}
+
+function moveGanttSplitTooltip(x, y) {
+  const tip = ganttSplitTooltip || document.getElementById('gantt-split-tooltip');
+  if (!tip || tip.style.display === 'none') return;
+  const pad = 14;
+  const rect = tip.getBoundingClientRect();
+  let left = x + 16;
+  let top = y + 16;
+  if (left + rect.width + pad > window.innerWidth) left = Math.max(pad, x - rect.width - 16);
+  if (top + rect.height + pad > window.innerHeight) top = Math.max(pad, y - rect.height - 16);
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function hideGanttSplitTooltip() {
+  const tip = ganttSplitTooltip || document.getElementById('gantt-split-tooltip');
+  if (!tip) return;
+  tip.style.display = 'none';
+}
+
+function showGanttContextMenu(x, y, blockEl) {
+  const menu = ganttContextMenu || document.getElementById('gantt-context-menu');
+  if (!menu) return;
+  ganttContextMenu = menu;
+  ganttContextTarget = blockEl || null;
+  const splitBtn = document.getElementById('gantt-context-split');
+  const topQty = Number(blockEl?.dataset?.hoverSplitTopQty || 0);
+  if (splitBtn) {
+    splitBtn.textContent = topQty > 0 ? `Split here (${fmt(topQty)}u)` : 'Split here';
+  }
+  menu.style.display = 'block';
+  const rect = menu.getBoundingClientRect();
+  const pad = 10;
+  let left = x;
+  let top = y;
+  if (left + rect.width + pad > window.innerWidth) left = Math.max(pad, window.innerWidth - rect.width - pad);
+  if (top + rect.height + pad > window.innerHeight) top = Math.max(pad, window.innerHeight - rect.height - pad);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function hideGanttContextMenu() {
+  const menu = ganttContextMenu || document.getElementById('gantt-context-menu');
+  if (!menu) return;
+  menu.style.display = 'none';
+  ganttContextTarget = null;
+}
+
+async function splitGanttContextTarget() {
+  const blockEl = ganttContextTarget;
+  hideGanttContextMenu();
+  if (!blockEl) return;
+  const rowId = ganttSplitTargetRowId(blockEl);
+  const psId = String(blockEl.dataset.psId || '').trim();
+  const opNo = String(blockEl.dataset.opNo || '').trim();
+  const label = [psId, opNo].filter(Boolean).join(' · ') || `Row ${rowId || 'n/a'}`;
+  const splitQty = Number(blockEl.dataset.hoverSplitTopQty || 0);
+  if (!Number.isFinite(splitQty) || splitQty <= 0) {
+    toast(`Hover the cut line on ${label} first`, 'error');
+    return;
+  }
+  if (!rowId) {
+    toast(`Hover the cut line on ${label} first`, 'error');
+    return;
+  }
+  try {
+    const res = await POST(`/api/rows/${rowId}/split`, { split_qty: splitQty, row_id: rowId });
+    const dbg = res && res.split_debug ? res.split_debug : null;
+    if (dbg) {
+      console.log('[Gantt split debug]', dbg);
+      const created = Array.isArray(res.new_row_ids) ? res.new_row_ids.join(',') : 'n/a';
+      const mode = dbg.split_mode ? ` [${dbg.split_mode}]` : '';
+      toast(`Split row ${dbg.target_row_id || rowId || 'n/a'}${mode} -> rows ${created}`, 'success');
+    } else {
+      toast('Row split', 'success');
+    }
+    loadGantt();
+  } catch (e) {
+    toast('Split failed: ' + e.message, 'error');
+  }
+}
+
+async function splitHoveredGanttBlock(blockEl) {
+  if (!blockEl) return;
+  const rowId = ganttSplitTargetRowId(blockEl);
+  const psId = String(blockEl.dataset.psId || '').trim();
+  const opNo = String(blockEl.dataset.opNo || '').trim();
+  const splitQty = Number(blockEl.dataset.hoverSplitTopQty || 0);
+  const label = [psId, opNo].filter(Boolean).join(' · ') || `Row ${rowId || 'n/a'}`;
+  if (!Number.isFinite(splitQty) || splitQty <= 0) {
+    toast(`Hover the cut line on ${label} first`, 'error');
+    return;
+  }
+  if (!rowId) {
+    toast(`Hover the cut line on ${label} first`, 'error');
+    return;
+  }
+  try {
+    const res = await POST(`/api/rows/${rowId}/split`, { split_qty: splitQty, row_id: rowId });
+    const dbg = res && res.split_debug ? res.split_debug : null;
+    if (dbg) {
+      console.log('[Gantt split debug]', dbg);
+      const created = Array.isArray(res.new_row_ids) ? res.new_row_ids.join(',') : 'n/a';
+      const mode = dbg.split_mode ? ` [${dbg.split_mode}]` : '';
+      toast(`Split row ${dbg.target_row_id || rowId || 'n/a'}${mode} -> rows ${created}`, 'success');
+    } else {
+      toast('Row split', 'success');
+    }
+    loadGantt();
+  } catch (e) {
+    toast('Split failed: ' + e.message, 'error');
+  }
+}
+
+function ganttBaseStyle(block, dayTotals) {
+  if (block.is_history) {
+    return {
+      hasActualEntered: true,
+      hasOverlap: false,
+      background: 'rgba(16,185,129,0.88)',
+      borderColor: 'rgba(16,185,129,1)',
+      textColor: '#fff',
+      opacity: '1',
+    };
+  }
+  const hasActualEntered = Number(block.actual_out_set || 0) === 1;
+  const baseBg = hasActualEntered ? 'rgba(34,197,94,0.75)' : (block.locked ? 'rgba(59,130,246,0.92)' : 'rgba(59,130,246,0.5)');
+  const baseBorder = hasActualEntered ? 'rgba(34,197,94,1)' : (block.locked ? 'rgba(59,130,246,1)' : 'rgba(59,130,246,0.75)');
+  const overlapRatio = Math.max(0, Math.min(1, parseFloat(block.sequence_overlap_ratio || 0)));
+  const hasOverlap = !!block.sequence_overlap;
+  const overlapBg = 'rgba(239,68,68,0.82)';
+  const overlapBorder = 'rgba(239,68,68,1)';
+  const background = hasOverlap
+    ? (overlapRatio <= 0
+      ? overlapBg
+      : `linear-gradient(to bottom, ${baseBg} 0%, ${baseBg} ${(overlapRatio * 100).toFixed(3)}%, ${overlapBg} ${(overlapRatio * 100).toFixed(3)}%, ${overlapBg} 100%)`)
+    : baseBg;
+  return {
+    hasActualEntered,
+    hasOverlap,
+    background,
+    borderColor: hasOverlap ? overlapBorder : baseBorder,
+    textColor: (block.locked || hasActualEntered || hasOverlap) ? '#fff' : 'var(--accent)',
+    opacity: (block.locked || hasActualEntered || hasOverlap) ? '1' : '0.5',
+  };
+}
+
+function ganttPauseSegments(block, machine) {
+  if (!machine || machine.shift_profile === '24HR') return '';
+  const start = parseInt(block.start_min || 0, 10);
+  const end = parseInt(block.end_min || 0, 10);
+  const span = end - start;
+  if (span <= 0) return '';
+
+  return BREAKS.map(([breakStart, breakEnd]) => {
+    const overlapStart = Math.max(start, breakStart);
+    const overlapEnd = Math.min(end, breakEnd);
+    if (overlapEnd <= overlapStart) return '';
+    const topPct = ((overlapStart - start) / span) * 100;
+    const heightPct = ((overlapEnd - overlapStart) / span) * 100;
+    return `<div style="position:absolute;left:-1px;right:-1px;top:${topPct}%;height:${heightPct}%;
+      background:rgba(248,250,252,0.78);border-top:1px dashed rgba(15,23,42,0.35);border-bottom:1px dashed rgba(15,23,42,0.35);
+      pointer-events:none;z-index:1"></div>`;
+  }).join('');
+}
+
+function setLastGanttMove(move) {
+  lastGanttMove = move;
+  const btn = document.getElementById('gantt-undo-btn');
+  if (btn) btn.disabled = !move;
+}
+
+async function undoLastGanttMove() {
+  if (!lastGanttMove) return;
+  const move = lastGanttMove;
+  try {
+    const endpoint = `/api/rows/${move.rowId}/move`;
+    await POST(endpoint, {
+      new_date: move.fromDate,
+      new_start_min: move.fromStartMin,
+      machine_id: move.fromMachineId,
+    });
+    setLastGanttMove(null);
+    toast('Last move undone', 'success');
+    loadGantt();
+  } catch (e) {
+    toast('Undo failed: ' + e.message, 'error');
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  const tag = (document.activeElement && document.activeElement.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable)) return;
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+    if (!lastGanttMove) return;
+    e.preventDefault();
+    undoLastGanttMove();
+  }
+});
+
+function shiftDays(n) {
+  const d = new Date(fromDate + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  fromDate = localISODate(d);
+  loadGantt();
+}
+function goToday() {
+  fromDate = localISODate();
+  loadGantt();
+}
+
+async function loadGantt() {
+  const container = document.getElementById('gantt-container');
+  bindGanttHorizontalScroll();
+  try {
+    const numDays = parseInt(document.getElementById('gantt-days').value);
+    const to = new Date(fromDate + 'T00:00:00');
+    to.setDate(to.getDate() + numDays - 1);
+    const toDate = localISODate(to);
+
+    document.getElementById('gantt-range-label').textContent = `${fromDate} to ${toDate}`;
+    container.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+
+    const data = await GET(`/api/gantt?from=${fromDate}&to=${toDate}`);
+    ganttLastMachines = Array.isArray(data && data.machines) ? data.machines : [];
+    renderGanttMachineFilters(ganttLastMachines);
+    renderGantt(data);
+  } catch (err) {
+    console.error('[Gantt load failed]', err);
+    if (container) {
+      container.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Failed to load Gantt: ${escapeHtml(err && err.message ? err.message : String(err))}</div>`;
+    }
+  }
+}
+
+function renderGanttMachineFilters(machines) {
+  const host = document.getElementById('gantt-machine-chips');
+  if (!host) return;
+  const rows = Array.isArray(machines) ? machines : [];
+  const types = [...new Set(rows.map(m => String(m.machine_category || '').trim()).filter(Boolean))].sort();
+  if (ganttSelectedMachineType !== 'all' && !types.includes(ganttSelectedMachineType)) {
+    ganttSelectedMachineType = 'all';
+  }
+  const chips = [
+    `<button type="button" class="chip ${ganttSelectedMachineType === 'all' ? 'active' : ''}" onclick="setGanttMachineFilter('all')">All types</button>`,
+    ...types.map(type => {
+      const active = ganttSelectedMachineType === type;
+      return `<button type="button" class="chip ${active ? 'active' : ''}" onclick="setGanttMachineFilter('${escapeJs(type)}')">${escapeHtml(type)}</button>`;
+    })
+  ];
+  host.innerHTML = chips.join('');
+}
+
+function setGanttMachineFilter(machineId) {
+  ganttSelectedMachineType = String(machineId || 'all');
+  loadGantt();
+}
+
+function renderGantt(
+data) {
+  const allMachines = Array.isArray(data.machines) ? data.machines : [];
+  const machineTypeById = {};
+  allMachines.forEach(machine => {
+    machineTypeById[String(machine.machine_id)] = String(machine.machine_category || '').trim();
+  });
+  const machines = ganttSelectedMachineType === 'all'
+    ? allMachines
+    : allMachines.filter(machine => String(machine.machine_category || '').trim() === String(ganttSelectedMachineType));
+  const blocks = Array.isArray(data.blocks)
+    ? data.blocks.filter(block => ganttSelectedMachineType === 'all' || String(machineTypeById[String(block.machine_id)] || '') === String(ganttSelectedMachineType))
+    : [];
+  const calendar = Array.isArray(data.calendar) ? data.calendar : [];
+  const dates = Array.isArray(data.dates) ? data.dates : [];
+  const calMap = {};
+  calendar.forEach(c => calMap[c.work_date] = c);
+
+  // Group blocks by machine_id and date
+  const blocksByMachineDate = {};
+  for (const b of blocks) {
+    const key = `${b.machine_id}|${b.plan_date}`;
+    if (!blocksByMachineDate[key]) blocksByMachineDate[key] = [];
+    blocksByMachineDate[key].push(b);
+  }
+
+  // Build grid: rows = dates, columns = machines
+  const numCols = machines.length + 1; // +1 for time axis
+  const colWidth = 150;
+  
+  let html = `<div style="display:flex;min-width:${colWidth * machines.length + 80}px">`;
+  
+  // Time axis column
+  html += `<div style="width:80px;flex-shrink:0;position:sticky;left:0;background:var(--bg2);z-index:15;border-right:1px solid var(--border2)">
+    <div style="height:48px;background:var(--bg3);border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--text3)">Time</div>`;
+  
+  for (const d of dates) {
+    const cal = calMap[d];
+    const isWorking = cal ? cal.is_working_day : (new Date(d + 'T00:00:00').getDay() !== 0 && new Date(d + 'T00:00:00').getDay() !== 6);
+    const displayDate = new Date(d + 'T00:00:00');
+    const dayName = displayDate.toLocaleDateString('en', {weekday:'short'});
+    const dayNum = displayDate.getDate();
+    const month = displayDate.toLocaleDateString('en', {month:'short'});
+    
+    html += `<div style="height:${ROW_HEIGHT}px;border-bottom:1px solid var(--border);position:relative;padding-top:4px">`;
+    // Time markers every 60 mins
+    for (let m = DAY_START; m <= DAY_END; m += 60) {
+      const pct = ((m - DAY_START) / DAY_MINS) * 100;
+      html += `<div style="position:absolute;top:${pct}%;left:0;right:0;font-size:9px;color:var(--text3);padding-left:2px;line-height:1">
+        ${minToHHMM(m)}
+      </div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Machine columns
+  for (const machine of machines) {
+    const isToday = dates.includes(localISODate());
+    
+    html += `<div style="width:${colWidth}px;flex-shrink:0;border-right:1px solid var(--border)">
+      <div style="height:48px;background:var(--bg3);border-bottom:1px solid var(--border2);padding:8px 10px;position:sticky;top:0;z-index:12">
+        <div style="font-weight:700;font-size:13px">${machine.machine_code}</div>
+        <div style="font-size:11px;color:var(--text3)">${machine.machine_category} · ${machine.shift_profile}</div>
+      </div>`;
+    
+    for (const d of dates) {
+      const cal = calMap[d];
+      const isWorkingDay = cal ? cal.is_working_day : (new Date(d + 'T00:00:00').getDay() !== 0 && new Date(d + 'T00:00:00').getDay() !== 6);
+      const displayDate = new Date(d + 'T00:00:00');
+      const isToday2 = d === localISODate();
+      
+      const dayBlocks = (blocksByMachineDate[`${machine.machine_id}|${d}`] || []);
+      const blockDayTotals = {};
+      dayBlocks.forEach((block) => {
+        const envKey = String(block.display_env_id || `R-${block.row_id || ''}`);
+        const key = `${envKey}|${block.plan_date}`;
+        if (!blockDayTotals[key]) blockDayTotals[key] = { qty: 0, actual: 0, actualSetCount: 0 };
+        blockDayTotals[key].qty += parseFloat(block.row_qty || 0);
+        blockDayTotals[key].actual += parseFloat(block.actual_out || 0);
+        blockDayTotals[key].actualSetCount += (parseInt(block.actual_out_set || 0, 10) === 1 ? 1 : 0);
+      });
+      
+      html += `<div style="height:${ROW_HEIGHT}px;position:relative;border-bottom:1px solid var(--border);
+        background:${!isWorkingDay ? 'rgba(239,68,68,0.05)' : (isToday2 ? 'rgba(59,130,246,0.03)' : 'transparent')}">`;
+      
+      if (!isWorkingDay) {
+        html += `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:11px;opacity:0.5">OFF</div>`;
+      }
+      
+      // Draw break zones and off-hour zones
+      const nonWorkZones = [
+        [DAY_START, 510],    // 08:00-08:30 pre-shift
+        [720, 765],           // 12:00-12:45 lunch
+        [960, 975],           // 16:00-16:15 break
+        [1200, DAY_END],      // 20:00-20:30 post
+      ];
+      for (const [zs, ze] of nonWorkZones) {
+        if (ze <= DAY_START || zs >= DAY_END) continue;
+        const top = ((Math.max(zs, DAY_START) - DAY_START) / DAY_MINS) * ROW_HEIGHT;
+        const height = ((Math.min(ze, DAY_END) - Math.max(zs, DAY_START)) / DAY_MINS) * ROW_HEIGHT;
+        if (height <= 0) continue;
+        html += `<div style="position:absolute;left:0;right:0;top:${top}px;height:${height}px;
+          background:rgba(100,116,139,0.12);border-top:1px dashed rgba(100,116,139,0.2);border-bottom:1px dashed rgba(100,116,139,0.2);pointer-events:none;z-index:1"></div>`;
+      }
+      
+      // Draw working window outlines
+      for (const [ws, we] of STANDARD_WINDOWS) {
+        const top = ((ws - DAY_START) / DAY_MINS) * ROW_HEIGHT;
+        const height = ((we - ws) / DAY_MINS) * ROW_HEIGHT;
+        html += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${height}px;
+          border:1px solid rgba(59,130,246,0.15);border-radius:2px;pointer-events:none;z-index:1"></div>`;
+      }
+      
+      // Draw blocks
+      for (const b of dayBlocks) {
+        const envKey = String(b.display_env_id || `R-${b.row_id || ''}`);
+        const bStart = Math.max(b.start_min, DAY_START);
+        const bEnd = Math.min(b.end_min, DAY_END);
+        if (bEnd <= bStart) continue;
+        
+        const top = ((bStart - DAY_START) / DAY_MINS) * ROW_HEIGHT;
+        const height = ((bEnd - bStart) / DAY_MINS) * ROW_HEIGHT;
+      const blockDayKey = `${envKey}|${b.plan_date}`;
+      const dayTotals = blockDayTotals[blockDayKey] || { qty: 0, actual: 0 };
+      const hasActual = b.actual_out > 0;
+      const hasActualEntered = Number(b.actual_out_set || 0) === 1;
+      const isComplete = (dayTotals.qty > 0 && (dayTotals.actual + 1e-9) >= dayTotals.qty) || (dayTotals.qty <= 0 && dayTotals.actual > 0);
+      const isLocked = b.locked;
+        
+        const bgColor = b.sequence_overlap ? 'rgba(239,68,68,0.82)' :
+                        hasActualEntered ? 'rgba(34,197,94,0.75)' :
+                        isComplete ? 'rgba(34,197,94,0.75)' :
+                        isLocked ? 'rgba(59,130,246,0.92)' : 'rgba(59,130,246,0.5)';
+        const borderColor = b.sequence_overlap ? 'rgba(239,68,68,1)' :
+                           hasActualEntered ? 'rgba(34,197,94,1)' :
+                           isComplete ? 'rgba(34,197,94,1)' :
+                           isLocked ? 'rgba(59,130,246,1)' : 'rgba(59,130,246,0.75)';
+        const textColor = isLocked || isComplete || hasActualEntered || b.sequence_overlap ? '#fff' : 'var(--accent)';
+        const blockOpacity = isLocked || isComplete || hasActualEntered || b.sequence_overlap ? '1' : '0.5';
+        
+        html += `<div class="gantt-block" draggable="true"
+          data-display-block-id="${envKey}" data-row-id="${b.row_id}"
+          data-machine-id="${machine.machine_id}" data-date="${d}"
+          data-start="${b.start_min}" data-end="${b.end_min}"
+          onclick="showBlockDetail('${escapeJs(b.display_env_id || '')}', ${b.row_id})"
+          style="position:absolute;left:4px;right:4px;top:${top}px;height:${Math.max(height,16)}px;
+          background:${bgColor};border:1px solid ${borderColor};border-radius:3px;padding:2px 5px;
+          font-size:10px;color:${textColor};overflow:hidden;cursor:pointer;z-index:5;box-shadow:0 1px 4px rgba(0,0,0,0.3);opacity:${blockOpacity}">
+          <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${psLabel(b)} · ${b.op_no||''}</div>
+          <div style="opacity:0.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fmt(b.row_qty)} u | ${minToHHMM(b.start_min)}-${minToHHMM(b.end_min)}</div>
+          ${isLocked ? '<div style="opacity:0.8">🔒</div>' : ''}
+        </div>`;
+      }
+      
+      html += '</div>';
+    }
+    
+    html += '</div>';
+  }
+  
+  html += '</div>';
+
+  // Date header row (sticky)
+  let dateHeader = `<div style="display:flex;position:sticky;top:0;z-index:20;background:var(--bg3);border-bottom:2px solid var(--border2)">
+    <div style="width:80px;flex-shrink:0;height:32px;border-right:1px solid var(--border2)"></div>`;
+  for (const d of dates) {
+    const displayDate = new Date(d + 'T00:00:00');
+    const isToday = d === localISODate();
+    const cal = calMap[d];
+    const isWorkingDay = cal ? cal.is_working_day : (displayDate.getDay() !== 0 && displayDate.getDay() !== 6);
+    dateHeader += `<div style="width:${colWidth}px;flex-shrink:0;height:32px;border-right:1px solid var(--border);
+      display:flex;align-items:center;justify-content:center;gap:4px;
+      background:${isToday?'rgba(59,130,246,0.15)':''};
+      color:${!isWorkingDay?'var(--text3)':isToday?'var(--accent)':'var(--text)'}">
+      <span style="font-size:11px;font-weight:${isToday?'700':'500'}">${displayDate.toLocaleDateString('en',{weekday:'short'})} ${displayDate.getDate()}/${displayDate.getMonth()+1}</span>
+      ${!isWorkingDay?'<span style="font-size:9px;color:var(--red)">OFF</span>':''}
+    </div>`;
+  }
+  dateHeader += '</div>';
+
+  const container = document.getElementById('gantt-container');
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = dateHeader + html;
+  container.innerHTML = '';
+  container.appendChild(wrapper);
+
+  // Enable drag-and-drop on blocks
+  initGanttDragDrop();
+}
+
+let dragBlock = null;
+
+function initGanttDragDrop() {
+  document.querySelectorAll('.gantt-block[draggable]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragBlock = {
+        rowId: parseInt(el.dataset.rowId),
+        machineId: parseInt(el.dataset.machineId),
+        date: el.dataset.date,
+        startMin: parseInt(el.dataset.start),
+      };
+      el.style.opacity = '0.4';
+    });
+    el.addEventListener('dragend', () => el.style.opacity = '1');
+  });
+
+  document.querySelectorAll('[data-machine-id-col]').forEach(col => {
+    col.addEventListener('dragover', e => e.preventDefault());
+    col.addEventListener('drop', handleGanttDrop);
+  });
+}
+
+async function handleGanttDrop(e) {
+  e.preventDefault();
+  if (!dragBlock) return;
+  
+  const cell = e.currentTarget;
+  const machineId = parseInt(cell.dataset.machineIdCol);
+  const date = cell.dataset.dateDrop;
+  
+  const cellRect = cell.getBoundingClientRect();
+  const relY = e.clientY - cellRect.top;
+  const pct = relY / ROW_HEIGHT;
+  const startMin = Math.round(DAY_START + pct * DAY_MINS);
+  const snapped = Math.max(510, Math.min(1200, Math.round(startMin)));
+  
+  try {
+    const endpoint = `/api/rows/${dragBlock.rowId}/move`;
+    await submitGanttMoveRequest(endpoint, {
+      new_date: date,
+      new_start_min: snapped,
+      machine_id: machineId,
+      row_id: dragBlock.rowId,
+      envelope_row_ids: [],
+    }, `${date} ${minToHHMM(snapped)}`);
+    loadGantt();
+  } catch(e) {
+    toast('Move failed: ' + e.message, 'error');
+  }
+  dragBlock = null;
+}
+
+async function submitGanttMoveRequest(endpoint, payload, requestedLabel, allowClashPrompt = true) {
+  const res = await POST(endpoint, payload);
+  if (res && res.needs_clash_resolution && allowClashPrompt) {
+    const choice = await openChoiceModal(
+      'Schedule clash detected',
+      `
+        <p style="margin:0 0 8px 0;color:var(--text2);font-size:13px">
+          The requested move slot clashes with existing work.
+        </p>
+        <p style="margin:0;color:var(--text3);font-size:12px">
+          Choose whether to stop, skip the clash, or move to the next free slot.
+        </p>
+      `,
+      [
+        { label: 'Cancel', value: 'cancel', className: 'btn btn-ghost' },
+        { label: 'Plan but skip clash', value: 'skip_clash', className: 'btn btn-warning' },
+        { label: 'Next free slot', value: 'next_free', className: 'btn btn-primary' },
+      ]
+    );
+    if (!choice || choice === 'cancel') {
+      toast('Move cancelled', 'info');
+      return res;
+    }
+    return submitGanttMoveRequest(endpoint, { ...payload, clash_mode: choice }, requestedLabel, false);
+  }
+  const actualDate = res && res.actual_date ? res.actual_date : payload.new_date;
+  const actualStartMin = res && Number.isFinite(Number(res.actual_start_min)) ? res.actual_start_min : payload.new_start_min;
+  const actualLabel = `${actualDate} ${minToHHMM(actualStartMin)}`;
+  toast(
+    res && res.message
+      ? `${res.message} (requested ${requestedLabel}, actual ${actualLabel})`
+      : `Requested ${requestedLabel}, moved to ${actualLabel}`,
+    res && res.message ? 'info' : 'success'
+  );
+  return res;
+}
+
+async function showBlockDetail(displayBlockId, rowId) {
+  const numDays = parseInt(document.getElementById('gantt-days').value || '7', 10);
+  const to = new Date(fromDate + 'T00:00:00');
+  to.setDate(to.getDate() + numDays - 1);
+  const toDate = localISODate(to);
+  const data = await GET(`/api/gantt?from=${fromDate}&to=${toDate}`);
+  const block = data.blocks.find(b => Number(b.row_id) === Number(rowId) && String(b.display_env_id || '') === String(displayBlockId || ''))
+    || data.blocks.find(b => Number(b.row_id) === Number(rowId))
+    || (displayBlockId ? data.blocks.find(b => String(b.display_env_id || '') === String(displayBlockId)) : null)
+    || {};
+  selectedGanttBlock = block;
+  selectedGanttRowId = rowId;
+  selectedGanttEnvelopeRowIds = (block.envelope_row_ids || block.split_row_ids || [block.row_id])
+    .map(v => parseInt(v, 10))
+    .filter(v => Number.isFinite(v) && v > 0);
+  
+  const panel = document.getElementById('block-detail');
+  document.getElementById('bd-title').textContent = `${psLabel(block)} — ${block.op_no||''}`;
+  document.getElementById('bd-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div><div class="field-hint">Machine</div><strong>${block.machine_code||'–'}</strong></div>
+      <div><div class="field-hint">Op</div><strong>${block.op_no||'–'}</strong></div>
+      <div><div class="field-hint">Date</div>${block.plan_date||'–'}</div>
+      <div><div class="field-hint">Time</div>${minToHHMM(block.start_min||0)} – ${minToHHMM(block.end_min||0)}</div>
+      <div><div class="field-hint">Qty</div>${fmt(block.row_qty)}</div>
+      <div><div class="field-hint">Actual Out</div><span class="${block.actual_out_set ? 'actual-set-value' : ''}">${fmt(block.actual_out)}</span></div>
+      <div><div class="field-hint">Locked</div>${block.is_history ? 'History' : (block.locked || block.row_locked ? 'Yes' : 'No')}</div>
+      <div><div class="field-hint">Due Date</div>${block.due_date||'–'}</div>
+    </div>
+    ${block.is_history ? '' : `
+    <div style="margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg3)">
+      <div class="field-hint" style="margin-bottom:6px">Actual Output For This Row</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="gantt-actual-input" type="number" min="0" step="1" placeholder="Leave blank to clear"
+          value="${intOrBlank(block.actual_out, block.actual_out_set)}"
+          class="${block.actual_out_set ? 'actual-set' : ''}"
+          style="width:140px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px">
+        <select id="gantt-carry-mode" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px">
+          <option value="weekdays">Weekdays</option>
+          <option value="weekends">Weekend OT</option>
+        </select>
+        <button class="btn btn-sm btn-success" onclick="saveGanttActualOutput()">Save Actual</button>
+        <button class="btn btn-sm btn-ghost" onclick="clearGanttActualOutput()">Clear</button>
+      </div>
+    </div>`}
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${block.is_history ? `<span class="badge badge-green">Completed history</span>` : `
+      <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); toggleLockGantt(${selectedGanttRowId || 'null'}, ${Number(block.row_locked || 0) === 1 ? 0 : 1})">
+        ${Number(block.row_locked || 0) === 1 ? 'Unlock Row' : 'Lock Row'}
+      </button>
+      <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); moveBlockGantt(${selectedGanttRowId || 'null'})">Move</button>
+      ${block.locked ? '' : `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteBlockGantt([${(selectedGanttEnvelopeRowIds || []).join(',')}])">Delete</button>`}
+      <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); archiveBlockGantt(${selectedGanttRowId || 'null'})">Archive</button>`}
+    </div>`;
+  panel.style.display = 'block';
+}
+
+async function toggleLockGantt(rowId, locked) {
+  if (rowId == null) {
+    throw new Error('Row id is required for Gantt lock actions');
+  }
+  await POST(`/api/rows/${rowId}/lock`, { locked });
+  toast(locked ? 'Row locked' : 'Row unlocked', 'info');
+  document.getElementById('block-detail').style.display = 'none';
+  await loadGantt();
+}
+
+async function saveGanttActualOutput() {
+  if (!selectedGanttBlock || !selectedGanttRowId) return;
+  const input = document.getElementById('gantt-actual-input');
+  const carryMode = document.getElementById('gantt-carry-mode');
+  if (!input) return;
+  const raw = input.value.trim();
+  const parsed = raw === '' ? '' : Number(input.valueAsNumber);
+  if (raw !== '' && !Number.isFinite(Number(input.valueAsNumber))) {
+    toast('Actual input is not a valid number', 'error');
+    return;
+  }
+  try {
+    const payload = {
+      row_id: selectedGanttRowId,
+      actual_out: parsed === '' ? '' : parsed,
+      carry_mode: carryMode ? carryMode.value : 'weekdays',
+    };
+    const res = await POST(`/api/rows/${selectedGanttRowId}/actual-output`, payload);
+    if (res && res.needs_clash_resolution) {
+      await promptGanttActualClashResolution({
+        rowId: selectedGanttRowId,
+        value: raw === '' ? '' : Number(raw),
+        carryMode: carryMode ? carryMode.value : 'weekdays',
+      });
+      return;
+    }
+    if (res && res.saved_row && Number.isFinite(Number(res.saved_row.actual_out_set)) && Number(res.saved_row.actual_out_set) === 1) {
+      selectedGanttBlock.actual_out = Number(res.saved_row.actual_out || 0);
+      selectedGanttBlock.actual_out_set = 1;
+      selectedGanttBlock.plan_date = res.saved_row.plan_date || selectedGanttBlock.plan_date;
+      selectedGanttBlock.start_min = Number.isFinite(Number(res.saved_row.start_min)) ? Number(res.saved_row.start_min) : selectedGanttBlock.start_min;
+      selectedGanttBlock.end_min = Number.isFinite(Number(res.saved_row.end_min)) ? Number(res.saved_row.end_min) : selectedGanttBlock.end_min;
+      selectedGanttRowId = Number(res.saved_row.row_id || selectedGanttRowId);
+    }
+    toast(
+      res && res.saved_row
+        ? `Row ${selectedGanttRowId}: requested ${raw || 'blank'}; saved on ${res.saved_row.plan_date} (${fmt(res.saved_row.actual_out || 0)})`
+        : (res && res.adjusted && res.adjusted.blocked_by_future_actual
+          ? 'Actual saved. Later actuals already exist, so the schedule was not replanned past this point.'
+          : (res && res.adjusted
+          ? 'Actual saved and schedule adjusted'
+          : (res && res.locked_no_replan
+            ? 'Actual saved. Schedule is locked, so timing was not adjusted.'
+            : 'Actual saved'))),
+      'success'
+    );
+    document.getElementById('block-detail').style.display = 'none';
+    await loadGantt();
+  } catch (e) {
+    toast('Actual update failed: ' + e.message, 'error');
+  }
+}
+
+async function promptGanttActualClashResolution({ rowId, value, carryMode }) {
+  const choice = await openChoiceModal(
+    'Schedule clash detected',
+    `
+      <p style="margin:0 0 8px 0;color:var(--text2);font-size:13px">
+        This actual output saves fine, but the schedule after it clashes with downstream work.
+      </p>
+      <p style="margin:0;color:var(--text3);font-size:12px">
+        Choose whether to move the clash forward or keep searching for a no-clash slot.
+      </p>
+    `,
+    [
+      { label: 'Move clash', value: 'immediate', className: 'btn btn-warning' },
+      { label: 'Move to no-clash slot', value: 'next_free', className: 'btn btn-primary' },
+      { label: 'Cancel', value: null, className: 'btn btn-ghost' },
+    ]
+  );
+  if (!choice) {
+    toast('Actual saved. Schedule left as-is.', 'info');
+    await loadGantt();
+    return;
+  }
+  try {
+    const res = await POST(`/api/rows/${rowId}/actual-output`, {
+      row_id: rowId,
+      actual_out: value,
+      carry_mode: carryMode,
+      finishup_mode: choice,
+      force_reflow: 1,
+    });
+    toast(res && res.saved_row ? `Row ${rowId}: requested ${value ?? 'blank'}; saved on ${res.saved_row.plan_date} (${fmt(res.saved_row.actual_out || 0)})` : 'Actual output updated and schedule adjusted', 'success');
+    document.getElementById('block-detail').style.display = 'none';
+    await loadGantt();
+  } catch (e) {
+    toast('Actual update failed: ' + e.message, 'error');
+  }
+}
+
+async function clearGanttActualOutput() {
+  if (!selectedGanttBlock || !selectedGanttRowId) return;
+  try {
+    await POST(`/api/rows/${selectedGanttRowId}/actual-output`, {
+      row_id: selectedGanttRowId,
+      actual_out: '',
+    });
+    toast('Actual cleared', 'info');
+    document.getElementById('block-detail').style.display = 'none';
+    await loadGantt();
+  } catch (e) {
+    toast('Clear failed: ' + e.message, 'error');
+  }
+}
+
+function moveBlockGantt_legacy(rowId) {
+  const newDate = prompt('Enter new date (YYYY-MM-DD):');
+  if (!newDate) return;
+  const newTime = prompt('Enter new start time (HH:MM, must be 08:30–20:00):');
+  if (!newTime) return;
+  const parts = newTime.split(':');
+  const startMin = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  const endpoint = rowId ? `/api/rows/${rowId}/move` : null;
+  if (!endpoint) {
+    toast('Row id is required for Move', 'error');
+    return;
+  }
+  POST(endpoint, { new_date: newDate, new_start_min: startMin })
+    .then((res) => {
+      const actualDate = res && res.actual_date ? res.actual_date : newDate;
+      const actualStartMin = res && Number.isFinite(Number(res.actual_start_min)) ? Number(res.actual_start_min) : startMin;
+      const requestedLabel = `${newDate} ${minToHHMM(startMin)}`;
+      const actualLabel = `${actualDate} ${minToHHMM(actualStartMin)}`;
+      toast(
+        res && res.message ? `${res.message} (requested ${requestedLabel}, actual ${actualLabel})` : `Requested ${requestedLabel}, moved to ${actualLabel}`,
+        res && res.message ? 'info' : 'success'
+      );
+      if (actualDate) fromDate = actualDate;
+      document.getElementById('block-detail').style.display='none';
+      loadGantt();
+    })
+    .catch(e => toast('Error: ' + e.message, 'error'));
+}
+
+async function deleteBlockGantt(rowIds) {
+  if (!confirm2('Delete this envelope?')) return;
+  const ids = Array.isArray(rowIds) ? rowIds : [];
+  const fallbackIds = Array.isArray(selectedGanttEnvelopeRowIds) ? selectedGanttEnvelopeRowIds : [];
+  const deleteIds = (ids.length ? ids : fallbackIds).map(v => parseInt(v, 10)).filter(v => Number.isFinite(v) && v > 0);
+  if (!deleteIds.length) {
+    toast('Delete failed: no row ids were available for this envelope', 'error');
+    return;
+  }
+  try {
+    await DEL(`/api/rows/${deleteIds[0]}`, {
+      row_id: deleteIds[0],
+      envelope_row_ids: deleteIds,
+    });
+    toast('Deleted', 'info');
+    document.getElementById('block-detail').style.display = 'none';
+    await loadGantt();
+  } catch (e) {
+    toast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+async function archiveBlockGantt(rowId) {
+  if (!confirm2('Archive to history?')) return;
+  if (!rowId) throw new Error('Row id is required for archive');
+  await POST(`/api/rows/${rowId}/history`, {});
+  toast('Archived', 'success');
+  document.getElementById('block-detail').style.display = 'none';
+  await loadGantt();
+}
+
+function renderGantt(data) {
+  const allMachines = Array.isArray(data.machines) ? data.machines : [];
+  const machineTypeById = {};
+  allMachines.forEach(machine => {
+    machineTypeById[String(machine.machine_id)] = String(machine.machine_category || '').trim();
+  });
+  const machines = ganttSelectedMachineType === 'all'
+    ? allMachines
+    : allMachines.filter(machine => String(machine.machine_category || '').trim() === String(ganttSelectedMachineType));
+  const blocks = Array.isArray(data.blocks)
+    ? data.blocks.filter(block => ganttSelectedMachineType === 'all' || String(machineTypeById[String(block.machine_id)] || '') === String(ganttSelectedMachineType))
+    : [];
+  const calendar = Array.isArray(data.calendar) ? data.calendar : [];
+  const dates = Array.isArray(data.dates) ? data.dates : [];
+  const calMap = {};
+  calendar.forEach(c => calMap[c.work_date] = c);
+  const frozenWidth = 60 + 90 + 84;
+  const machineWidth = 150;
+  const weekWidth = 60;
+  const dayWidth = 90;
+  const timeWidth = 84;
+  const totalMins = DAY_END - DAY_START;
+
+  const blocksByCell = {};
+  const blocksByEnvelope = {};
+  for (const block of blocks) {
+    const envKey = String(block.display_env_id || `R-${block.row_id || ''}`);
+    if (!blocksByEnvelope[envKey]) {
+      blocksByEnvelope[envKey] = {
+        total_qty: 0,
+        split_parts: [],
+        split_row_ids: [],
+      };
+    }
+    blocksByEnvelope[envKey].total_qty = Math.max(
+      blocksByEnvelope[envKey].total_qty || 0,
+      parseFloat(block.envelope_qty_all || block.row_qty || 0)
+    );
+    blocksByEnvelope[envKey].split_parts.push(parseFloat(block.row_qty || 0));
+    blocksByEnvelope[envKey].split_row_ids.push(parseInt(block.row_id || 0, 10));
+    const key = `${block.machine_id}|${block.plan_date}`;
+    if (!blocksByCell[key]) blocksByCell[key] = [];
+    blocksByCell[key].push(block);
+  }
+  for (const key of Object.keys(blocksByCell)) {
+    blocksByCell[key].sort((a, b) => (a.start_min - b.start_min) || (a.end_min - b.end_min) || (a.row_id - b.row_id));
+  }
+
+  const isoWeek = (isoDate) => {
+    const dt = new Date(`${isoDate}T00:00:00`);
+    const dayNr = (dt.getDay() + 6) % 7;
+    dt.setDate(dt.getDate() - dayNr + 3);
+    const firstThursday = new Date(dt.getFullYear(), 0, 4);
+    const firstDayNr = (firstThursday.getDay() + 6) % 7;
+    firstThursday.setDate(firstThursday.getDate() - firstDayNr + 3);
+    return 1 + Math.round((dt - firstThursday) / 604800000);
+  };
+
+  const totalColumnWidth = machines.length * machineWidth;
+  let html = `<div style="min-width:${weekWidth + dayWidth + timeWidth + totalColumnWidth}px">`;
+  const envelopeProgressByMachine = {};
+
+  html += `<div style="position:sticky;top:0;z-index:25;background:var(--bg2)">`;
+  html += `<div style="display:flex;border-bottom:1px solid var(--border2)">`;
+  html += `<div style="width:${weekWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Wk</div>`;
+  html += `<div style="width:${dayWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Day / Date</div>`;
+  html += `<div style="width:${timeWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Time</div>`;
+  for (const machine of machines) {
+    html += `<div style="width:${machineWidth}px;flex-shrink:0;padding:8px 4px;background:var(--bg3);border-right:1px solid var(--border);text-align:center">
+      <div style="font-weight:700;font-size:12px">${machine.machine_code}</div>
+      <div style="font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${machine.machine_category}</div>
+    </div>`;
+  }
+  html += `</div>`;
+  html += `</div>`;
+
+  for (const d of dates) {
+    const displayDate = new Date(`${d}T00:00:00`);
+    const cal = calMap[d];
+    const isWorkingDay = cal ? cal.is_working_day : (displayDate.getDay() !== 0 && displayDate.getDay() !== 6);
+    const weekLabel = `WK ${String(isoWeek(d)).padStart(2, '0')}`;
+    html += `<div class="gantt-day-row" style="display:flex;position:relative">`;
+    html += `<div style="width:${weekWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:sticky;left:0;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border);padding:0 4px">
+      <div style="position:sticky;top:44px;display:flex;align-items:center;justify-content:center;min-height:44px;font-size:11px;color:var(--text2);font-weight:700;text-align:center;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'}">${weekLabel}</div>
+    </div>`;
+    html += `<div style="width:${dayWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:sticky;left:${weekWidth}px;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border)">
+      <div style="position:sticky;top:44px;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 6px;text-align:center;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'}">
+        <div style="font-weight:700;color:${d === localISODate() ? 'var(--accent)' : 'var(--text)'}">${displayDate.toLocaleDateString('en', { weekday:'short' })}</div>
+        <div style="font-size:11px;color:var(--text2)">${displayDate.getDate()}/${displayDate.getMonth() + 1}</div>
+        ${!isWorkingDay ? '<div style="font-size:10px;color:var(--red)">OFF</div>' : ''}
+      </div>
+    </div>`;
+    html += `<div style="width:${timeWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:sticky;left:${weekWidth + dayWidth}px;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border)">
+      <div style="position:relative;height:${ROW_HEIGHT}px;display:flex;align-items:center;justify-content:center">
+        ${Array.from({length: Math.floor((DAY_END - DAY_START) / 60)}, (_, idx) => {
+          const m = DAY_START + idx * 60;
+          const top = ((m - DAY_START) / totalMins) * ROW_HEIGHT;
+          return `<div style="position:absolute;top:${top}px;left:0;right:0;font-size:10px;color:var(--text3);text-align:center">${minToHHMM(m)}</div>`;
+        }).join('')}
+      </div>
+    </div>`;
+    for (const machine of machines) {
+      const machineProgress = envelopeProgressByMachine[machine.machine_id] || (envelopeProgressByMachine[machine.machine_id] = {});
+      const dayBlocks = blocksByCell[`${machine.machine_id}|${d}`] || [];
+      const displayBlocks = dayBlocks.map((block) => {
+        const envKey = String(block.display_env_id || `R-${block.row_id || ''}`);
+        const env = blocksByEnvelope[envKey] || {
+          total_qty: parseFloat(block.envelope_qty_all || block.row_qty || 0),
+          split_parts: [parseFloat(block.row_qty || 0)],
+          split_row_ids: [parseInt(block.row_id || 0, 10)],
+        };
+        return {
+          ...block,
+          env_key: envKey,
+          start_min: parseInt(block.start_min || 0, 10),
+          end_min: parseInt(block.end_min || 0, 10),
+          row_qty: parseFloat(block.row_qty || 0),
+          envelope_qty: parseFloat(block.envelope_qty_all || env.total_qty || block.row_qty || 0),
+          envelope_parts: [...(env.split_parts || [parseFloat(block.row_qty || 0)])],
+          envelope_row_ids: [...(env.split_row_ids || [parseInt(block.row_id || 0, 10)])],
+          envelope_before_qty: 0,
+          actual_out: parseFloat(block.actual_out || 0),
+          actual_out_set: parseInt(block.actual_out_set || 0, 10) || 0,
+          row_locked: parseInt(block.row_locked || 0, 10) || 0,
+          setup_mins: parseFloat(block.setup_mins || 0),
+          row_id: block.row_id,
+          split_parts: [parseFloat(block.row_qty || 0)],
+          split_row_ids: [parseInt(block.row_id || 0, 10)],
+        };
+      }).sort((a, b) => (a.start_min - b.start_min) || (a.end_min - b.end_min) || (a.row_id - b.row_id));
+      displayBlocks.forEach((b) => {
+        const envKey = String(b.env_key || b.display_env_id || '');
+        const before = Math.max(0, Number(machineProgress[envKey] || 0));
+        b.envelope_before_qty = before;
+        machineProgress[envKey] = before + Math.max(0, Number(b.row_qty || 0));
+      });
+      html += `<div data-machine-id-col="${machine.machine_id}" data-date-drop="${d}" style="width:${machineWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:relative;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${!isWorkingDay ? 'rgba(239,68,68,0.05)' : 'transparent'}">`;
+
+      for (let m = DAY_START; m < DAY_END; m += 60) {
+        const top = ((m - DAY_START) / totalMins) * ROW_HEIGHT;
+        html += `<div style="position:absolute;left:0;right:0;top:${top}px;border-top:1px solid rgba(100,116,139,0.18);pointer-events:none"></div>`;
+      }
+
+      for (const [zs, ze] of [[DAY_START, 510], [720, 765], [960, 975], [1200, DAY_END]]) {
+        const top = ((Math.max(zs, DAY_START) - DAY_START) / totalMins) * ROW_HEIGHT;
+        const height = ((Math.min(ze, DAY_END) - Math.max(zs, DAY_START)) / totalMins) * ROW_HEIGHT;
+        if (height > 0) {
+          html += `<div style="position:absolute;left:0;right:0;top:${top}px;height:${height}px;background:rgba(100,116,139,0.12);pointer-events:none"></div>`;
+        }
+      }
+
+      displayBlocks.forEach((b, index) => {
+        const top = ((Math.max(b.start_min, DAY_START) - DAY_START) / totalMins) * ROW_HEIGHT;
+        const height = Math.max(18, ((Math.min(b.end_min, DAY_END) - Math.max(b.start_min, DAY_START)) / totalMins) * ROW_HEIGHT);
+        const dayTotals = { qty: b.row_qty || 0, actual: b.actual_out || 0 };
+        const style = ganttBaseStyle(b, dayTotals);
+        const pauseHtml = ganttPauseSegments(b, machine);
+        const timeLabel = `${minToHHMM(b.start_min)} → ${minToHHMM(b.end_min)}`;
+        const splitGuide = ganttSplitGuide(b.split_parts || [b.row_qty]);
+        const splitGuideHtml = splitGuide ? `
+          <div class="gantt-split-overlay" style="position:absolute;inset:0;opacity:0;transition:opacity 120ms ease;pointer-events:none;z-index:3;background:rgba(15,23,42,0.18)">
+            <div class="gantt-split-line" style="position:absolute;left:4px;right:4px;border-top:1px solid rgba(255,255,255,0.96);box-shadow:0 0 0 1px rgba(15,23,42,0.25)"></div>
+            <div class="gantt-split-time" style="position:absolute;left:0;right:0;text-align:center;font-size:10px;font-weight:700;color:#fff;line-height:1;display:none;text-shadow:0 1px 2px rgba(0,0,0,0.6)"></div>
+            <div class="gantt-split-top" style="position:absolute;left:0;right:0;text-align:center;font-size:11px;font-weight:700;color:#fff;line-height:1;display:none;text-shadow:0 1px 2px rgba(0,0,0,0.6)"></div>
+            <div class="gantt-split-bottom" style="position:absolute;left:0;right:0;text-align:center;font-size:11px;font-weight:700;color:#fff;line-height:1;display:none;text-shadow:0 1px 2px rgba(0,0,0,0.6)"></div>
+          </div>` : '';
+        const setupMins = Math.max(0, Number(b.setup_mins || 0));
+        const spanMins = Math.max(1, Number(b.end_min || 0) - Number(b.start_min || 0));
+        const setupHeight = Math.max(0, Math.min(height, height * (setupMins / spanMins)));
+        const setupOverlay = setupMins > 0 ? `
+          <div class="gantt-setup-overlay" style="position:absolute;left:0;right:0;top:0;height:${setupHeight}px;z-index:2;
+            background:repeating-linear-gradient(135deg, rgba(255,255,255,0.12) 0px, rgba(255,255,255,0.12) 3px, rgba(15,23,42,0.20) 3px, rgba(15,23,42,0.20) 6px);
+            border-bottom:1px solid rgba(255,255,255,0.16);pointer-events:none"></div>` : '';
+        html += `<div class="gantt-block" ${b.is_history ? '' : 'draggable="true"'}
+          data-display-env-id="${String(b.display_env_id || `R-${b.row_id || ''}`)}" data-row-id="${b.row_id}"
+          data-ps-id="${escapeHtml(b.ps_id || '')}" data-op-no="${escapeHtml(b.op_no || '')}" data-is-history="${b.is_history ? '1' : '0'}"
+          data-envelope-id="${escapeHtml(b.envelope_id || b.hist_envelope_id || 0)}"
+          data-envelope-anchor-row-id="${escapeHtml(b.envelope_anchor_row_id || 0)}"
+          data-machine-id="${machine.machine_id}" data-date="${d}"
+          data-start="${b.start_min}" data-end="${b.end_min}"
+          data-envelope-key="${escapeHtml((b.envelope_row_ids || b.split_row_ids || [b.row_id]).map(v => parseInt(v, 10) || 0).filter(v => v > 0).sort((a, b) => a - b).join(','))}"
+          data-setup-mins="${escapeHtml(setupMins)}"
+          data-total-span-mins="${escapeHtml(spanMins)}"
+          data-envelope-total="${escapeHtml(b.envelope_qty || b.row_qty)}"
+          data-envelope-before="${escapeHtml(b.envelope_before_qty || 0)}"
+          data-envelope-parts="${escapeHtml((b.envelope_parts || b.split_parts || [b.row_qty]).join(','))}"
+          data-envelope-row-ids="${escapeHtml((b.envelope_row_ids || b.split_row_ids || [b.row_id]).join(','))}"
+          data-split-parts="${escapeHtml((b.split_parts || [b.row_qty]).join(','))}"
+          data-split-row-ids="${escapeHtml((b.split_row_ids || [b.row_id]).join(','))}"
+          data-split-total="${escapeHtml(b.row_qty)}"
+          onclick="showBlockDetail('${escapeJs(b.display_env_id || '')}', ${b.row_id})"
+          style="position:absolute;left:4px;right:4px;top:${top}px;height:${height}px;background:${style.background};border:1px solid ${style.borderColor};border-radius:4px;padding:2px 4px;font-size:10px;color:${style.textColor};overflow:hidden;cursor:pointer;z-index:5;opacity:${style.opacity}">
+          ${pauseHtml}
+          ${setupOverlay}
+          ${splitGuideHtml}
+          <div style="position:relative;z-index:2;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.ps_id}${b.is_history ? ' · Done' : ''}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.op_type || b.op_no || ''}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Qty: ${fmt(b.row_qty)} u${b.envelope_qty && b.envelope_qty !== b.row_qty ? ` | Env: ${fmt(b.envelope_qty)} u` : ''}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Time: ${timeLabel}</div>
+        </div>`;
+      });
+
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+  html += `</div>`;
+  document.getElementById('gantt-container').innerHTML = html;
+  initGanttSplitTooltips();
+  drawEnvelopeContinuationConnectors();
+  initGanttDragDrop(machineWidth, weekWidth, dayWidth, timeWidth);
+}
+
+function drawEnvelopeContinuationConnectors() {
+  const container = document.getElementById('gantt-container');
+  const wrapper = container ? container.firstElementChild : null;
+  if (!wrapper) return;
+  wrapper.style.position = 'relative';
+  window.__ganttEnvelopeConnectors = [];
+  window.__ganttEnvelopeConnectorDebug = { blocks: [], groups: [], skipped: [] };
+
+  const oldLayer = wrapper.querySelector('.gantt-envelope-layer');
+  if (oldLayer) oldLayer.remove();
+
+  const blockEls = Array.from(wrapper.querySelectorAll('.gantt-block'));
+  if (!blockEls.length) return;
+
+  const grouped = {};
+  blockEls.forEach(el => {
+    const envelopeId = parseInt(el.dataset.envelopeId || '0', 10) || 0;
+    const key = envelopeId > 0 ? `E-${envelopeId}` : (el.dataset.envelopeKey || el.dataset.displayEnvId || `R-${el.dataset.rowId || ''}`);
+    window.__ganttEnvelopeConnectorDebug.blocks.push({
+      row_id: parseInt(el.dataset.rowId || '0', 10) || 0,
+      display_env_id: el.dataset.displayEnvId || '',
+      envelope_id: envelopeId,
+      envelope_key: key,
+      envelope_anchor_row_id: parseInt(el.dataset.envelopeAnchorRowId || '0', 10) || 0,
+      date: el.dataset.date || '',
+      start: parseInt(el.dataset.start || '0', 10) || 0,
+      end: parseInt(el.dataset.end || '0', 10) || 0,
+    });
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(el);
+  });
+
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  layer.classList.add('gantt-envelope-layer');
+  layer.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  layer.setAttribute('width', `${Math.max(wrapper.scrollWidth, wrapper.clientWidth)}`);
+  layer.setAttribute('height', `${Math.max(wrapper.scrollHeight, wrapper.clientHeight)}`);
+  layer.setAttribute('viewBox', `0 0 ${Math.max(wrapper.scrollWidth, wrapper.clientWidth)} ${Math.max(wrapper.scrollHeight, wrapper.clientHeight)}`);
+  layer.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:25;overflow:visible';
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', 'gantt-envelope-arrow');
+  marker.setAttribute('markerWidth', '7');
+  marker.setAttribute('markerHeight', '7');
+  marker.setAttribute('refX', '4');
+  marker.setAttribute('refY', '3');
+  marker.setAttribute('orient', 'auto');
+  marker.setAttribute('markerUnits', 'strokeWidth');
+  const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrowPath.setAttribute('d', 'M0,0 L4.8,3 L0,6');
+  arrowPath.setAttribute('fill', 'none');
+  arrowPath.setAttribute('stroke', '#fff');
+  arrowPath.setAttribute('stroke-width', '1.25');
+  marker.appendChild(arrowPath);
+  defs.appendChild(marker);
+  layer.appendChild(defs);
+
+  Object.values(grouped).forEach(group => {
+    if (group.length < 2) return;
+    group.sort((a, b) => {
+      const aDate = a.dataset.date || '';
+      const bDate = b.dataset.date || '';
+      if (aDate !== bDate) return aDate.localeCompare(bDate);
+      return parseInt(a.dataset.start || '0', 10) - parseInt(b.dataset.start || '0', 10);
+    });
+
+    window.__ganttEnvelopeConnectorDebug.groups.push({
+      envelope_key: String(parseInt(group[0].dataset.envelopeId || '0', 10) || 0 ? `E-${group[0].dataset.envelopeId}` : (group[0].dataset.envelopeKey || group[0].dataset.displayEnvId || '')),
+      envelope_id: parseInt(group[0].dataset.envelopeId || '0', 10) || 0,
+      row_ids: group.map(el => parseInt(el.dataset.rowId || '0', 10) || 0),
+    });
+
+    for (let i = 0; i < group.length - 1; i++) {
+      const current = group[i];
+      const next = group[i + 1];
+      const rect1 = current.getBoundingClientRect();
+      const rect2 = next.getBoundingClientRect();
+      const fromRowId = parseInt(current.dataset.rowId || '0', 10) || 0;
+      const toRowId = parseInt(next.dataset.rowId || '0', 10) || 0;
+      const envelopeKey = String(current.dataset.envelopeKey || current.dataset.displayEnvId || `R-${current.dataset.rowId || ''}`);
+      const x = rect1.left + (rect1.width / 2) - wrapperRect.left + wrapper.scrollLeft;
+      let y1 = rect1.bottom - wrapperRect.top + wrapper.scrollTop + 2;
+      let y2 = rect2.top - wrapperRect.top + wrapper.scrollTop - 2;
+      if (y2 - y1 < 12) {
+        const mid = (y1 + y2) / 2;
+        y1 = mid - 6;
+        y2 = mid + 6;
+      }
+      if (y2 <= y1) continue;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x);
+      line.setAttribute('y1', y1);
+      line.setAttribute('x2', x);
+      line.setAttribute('y2', y2);
+      line.setAttribute('stroke', '#fff');
+      line.setAttribute('stroke-width', '2.2');
+      line.setAttribute('stroke-dasharray', '1 4');
+      line.setAttribute('stroke-linecap', 'round');
+      line.setAttribute('marker-end', 'url(#gantt-envelope-arrow)');
+      line.setAttribute('data-from-row-id', String(fromRowId));
+      line.setAttribute('data-to-row-id', String(toRowId));
+      line.setAttribute('data-envelope-key', envelopeKey);
+      line.style.filter = 'drop-shadow(0 0 1px rgba(0,0,0,0.55))';
+      layer.appendChild(line);
+      window.__ganttEnvelopeConnectors.push({
+        from_row_id: fromRowId,
+        to_row_id: toRowId,
+        envelope_key: envelopeKey,
+        x1: x,
+        y1,
+        x2: x,
+        y2,
+      });
+      if (fromRowId <= 0 || toRowId <= 0) {
+        window.__ganttEnvelopeConnectorDebug.skipped.push({
+          reason: 'invalid_row_id',
+          from_row_id: fromRowId,
+          to_row_id: toRowId,
+          envelope_key: envelopeKey,
+        });
+      }
+    }
+  });
+
+  wrapper.appendChild(layer);
+}
+
+let ganttDragGuide = null;
+
+function clearGanttDragGuide() {
+  if (!ganttDragGuide) return;
+  if (ganttDragGuide.line && ganttDragGuide.line.parentNode) ganttDragGuide.line.parentNode.removeChild(ganttDragGuide.line);
+  if (ganttDragGuide.label && ganttDragGuide.label.parentNode) ganttDragGuide.label.parentNode.removeChild(ganttDragGuide.label);
+  ganttDragGuide = null;
+}
+
+function showGanttDragGuide(cell, startMin, weekWidth, dayWidth, timeWidth) {
+  const row = cell.closest('.gantt-day-row');
+  if (!row) return;
+  clearGanttDragGuide();
+  const rowRect = row.getBoundingClientRect();
+  const cellRect = cell.getBoundingClientRect();
+  const top = ((Math.max(startMin, DAY_START) - DAY_START) / (DAY_END - DAY_START)) * ROW_HEIGHT;
+  const timeColLeft = weekWidth + dayWidth;
+  const timeColCenter = timeColLeft + (timeWidth / 2);
+  const line = document.createElement('div');
+  line.style.cssText = `position:absolute;left:${timeColLeft}px;top:${top}px;width:${cell.offsetLeft + cell.offsetWidth - timeColLeft}px;border-top:2px solid rgba(255,255,255,0.65);pointer-events:none;z-index:30;`;
+  const label = document.createElement('div');
+  label.textContent = minToHHMM(startMin);
+  label.style.cssText = `position:absolute;left:${timeColCenter}px;top:${Math.max(2, top - 10)}px;transform:translateX(-50%);padding:2px 6px;background:rgba(255,255,255,0.92);color:#111827;border-radius:999px;font-size:11px;font-weight:700;line-height:1.2;pointer-events:none;z-index:31;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);`;
+  row.appendChild(line);
+  row.appendChild(label);
+  ganttDragGuide = { line, label };
+}
+
+function initGanttDragDrop(machineWidth, weekWidth, dayWidth, timeWidth) {
+  document.querySelectorAll('.gantt-block[draggable]').forEach(el => {
+    el.addEventListener('dragstart', () => {
+      dragBlock = {
+        rowId: parseInt(el.dataset.rowId),
+        machineId: parseInt(el.dataset.machineId),
+        date: el.dataset.date,
+        startMin: parseInt(el.dataset.start),
+        psId: el.dataset.psId || '',
+        opNo: el.dataset.opNo || '',
+      };
+      el.dataset.baseOpacity = el.style.opacity || '1';
+      el.style.opacity = '0.4';
+    });
+    el.addEventListener('dragend', () => {
+      el.style.opacity = el.dataset.baseOpacity || '1';
+      clearGanttDragGuide();
+    });
+    el.addEventListener('dragover', e => {
+      if (!dragBlock) return;
+      const sameFamily = String(dragBlock.machineId || '') === String(el.dataset.machineId || '')
+        && String(dragBlock.rowId || '') !== String(el.dataset.rowId || '')
+        && String(dragBlock.psId || '') === String(el.dataset.psId || '')
+        && String(dragBlock.opNo || '') === String(el.dataset.opNo || '')
+        && String(dragBlock.machineId || '') === String(el.dataset.machineId || '');
+      if (!sameFamily) return;
+      e.preventDefault();
+      el.style.outline = '2px solid rgba(34,197,94,0.9)';
+      el.style.outlineOffset = '1px';
+    });
+    el.addEventListener('dragleave', () => {
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+    });
+    el.addEventListener('drop', async e => {
+      if (!dragBlock) return;
+      const sourceRowId = Number(dragBlock.rowId || 0);
+      const targetRowId = Number(el.dataset.rowId || 0);
+      const sameFamily = sourceRowId && targetRowId
+        && sourceRowId !== targetRowId
+        && String(dragBlock.machineId || '') === String(el.dataset.machineId || '')
+        && String(dragBlock.psId || '') === String(el.dataset.psId || '')
+        && String(dragBlock.opNo || '') === String(el.dataset.opNo || '')
+        && String(dragBlock.rowId || '') !== String(el.dataset.rowId || '');
+      if (!sameFamily) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const res = await POST(`/api/rows/${sourceRowId}/merge-into/${targetRowId}`, {});
+        toast(res && res.message ? res.message : 'Envelopes merged', res && res.merged_from_row_ids && res.merged_from_row_ids.length ? 'success' : 'info');
+        loadGantt();
+      } catch (err) {
+        toast('Merge failed: ' + err.message, 'error');
+      }
+      dragBlock = null;
+      clearGanttDragGuide();
+    });
+  });
+
+  document.querySelectorAll('[data-machine-id-col]').forEach(cell => {
+    cell.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!dragBlock) return;
+      const cellRect = cell.getBoundingClientRect();
+      const relY = e.clientY - cellRect.top;
+      const pct = relY / ROW_HEIGHT;
+      const startMin = Math.round(DAY_START + pct * (DAY_END - DAY_START));
+      const snapped = Math.max(510, Math.min(1200, Math.round(startMin)));
+      showGanttDragGuide(cell, snapped, weekWidth, dayWidth, timeWidth);
+    });
+    cell.addEventListener('dragleave', e => {
+      if (!cell.contains(e.relatedTarget)) clearGanttDragGuide();
+    });
+    cell.addEventListener('drop', handleGanttDrop);
+  });
+}
+
+function initGanttSplitTooltips() {
+  ganttSplitTooltip = document.getElementById('gantt-split-tooltip');
+  ganttContextMenu = document.getElementById('gantt-context-menu');
+  const splitMenuBtn = document.getElementById('gantt-context-split');
+  if (splitMenuBtn && !splitMenuBtn.dataset.bound) {
+    splitMenuBtn.dataset.bound = '1';
+    splitMenuBtn.addEventListener('click', splitGanttContextTarget);
+  }
+  document.addEventListener('click', hideGanttContextMenu);
+  document.addEventListener('scroll', hideGanttContextMenu, true);
+  document.querySelectorAll('.gantt-block').forEach(el => {
+    const splitParts = (el.dataset.splitParts || '')
+      .split(',')
+      .map(v => Number(v))
+      .filter(v => Number.isFinite(v) && v > 0);
+    const splitGuide = ganttSplitGuide(splitParts);
+    const overlay = el.querySelector('.gantt-split-overlay');
+    if (!splitGuide || !overlay) return;
+    const line = overlay.querySelector('.gantt-split-line');
+    const topLabel = overlay.querySelector('.gantt-split-top');
+    const bottomLabel = overlay.querySelector('.gantt-split-bottom');
+    el.addEventListener('contextmenu', (e) => {
+      if (el.dataset.isHistory === '1') return;
+      e.preventDefault();
+      e.stopPropagation();
+      hideGanttSplitTooltip();
+      if (!updateGanttSplitOverlay(el, overlay, e.clientY)) {
+        toast('Hover the production area, not setup/break time, before splitting', 'info');
+        return;
+      }
+      showGanttContextMenu(e.clientX, e.clientY, el);
+    });
+    el.addEventListener('mouseenter', (e) => {
+      overlay.style.opacity = '1';
+      if (!updateGanttSplitOverlay(el, overlay, e.clientY)) {
+        overlay.style.opacity = '0';
+      }
+    });
+    el.addEventListener('mousemove', (e) => {
+      if (!updateGanttSplitOverlay(el, overlay, e.clientY)) {
+        overlay.style.opacity = '0';
+      }
+    });
+    el.addEventListener('mouseleave', () => {
+      overlay.style.opacity = '0';
+      if (line) line.style.display = 'none';
+      if (topLabel) topLabel.style.display = 'none';
+      if (bottomLabel) bottomLabel.style.display = 'none';
+    });
+  });
+}
+
+async function handleGanttDrop(e) {
+  e.preventDefault();
+  if (!dragBlock) return;
+  const cell = e.currentTarget;
+  const machineId = parseInt(cell.dataset.machineIdCol);
+  const date = cell.dataset.dateDrop;
+  const cellRect = cell.getBoundingClientRect();
+  const relY = e.clientY - cellRect.top;
+  const pct = relY / ROW_HEIGHT;
+  const startMin = Math.round(DAY_START + pct * (DAY_END - DAY_START));
+  const snapped = Math.max(510, Math.min(1200, Math.round(startMin)));
+
+  try {
+    setLastGanttMove({
+      rowId: dragBlock.rowId || null,
+      fromDate: dragBlock.date,
+      fromStartMin: dragBlock.startMin,
+      fromMachineId: dragBlock.machineId,
+    });
+    const endpoint = `/api/rows/${dragBlock.rowId}/move`;
+    const res = await POST(endpoint, {
+      new_date: date, new_start_min: snapped, machine_id: machineId
+    });
+    const actualDate = res && res.actual_date ? res.actual_date : date;
+    const actualStartMin = res && Number.isFinite(Number(res.actual_start_min)) ? Number(res.actual_start_min) : snapped;
+    toast(
+      res && res.message ? res.message : `Row moved to ${actualDate} ${minToHHMM(actualStartMin)}`,
+      res && res.message ? 'info' : 'success'
+    );
+    clearGanttDragGuide();
+    loadGantt();
+  } catch(err) {
+    clearGanttDragGuide();
+    toast('Move failed: ' + err.message, 'error');
+  }
+  dragBlock = null;
+}
+
+function moveBlockGantt(rowId = null) {
+  const block = selectedGanttBlock || null;
+  if (!block) {
+    toast('Please open the block details first', 'info');
+    return;
+  }
+  pendingGanttMove = {
+    rowId,
+    envelopeRowIds: Array.isArray(selectedGanttEnvelopeRowIds) ? [...selectedGanttEnvelopeRowIds] : [],
+    fromDate: block.plan_date,
+    fromStartMin: block.start_min,
+    fromMachineId: block.machine_id,
+    machineId: block.machine_id,
+  };
+  document.getElementById('gantt-move-summary').textContent = `${psLabel(block)}${block.op_no ? ` · Op ${block.op_no}` : ''}${block.machine_code ? ` · ${block.machine_code}` : ''}`;
+  document.getElementById('gantt-move-date').value = block.plan_date || fromDate;
+  document.getElementById('gantt-move-time').value = minToHHMM(block.start_min || 510);
+  document.getElementById('gantt-move-modal').style.display = 'flex';
+}
+
+function closeGanttMoveModal() {
+  pendingGanttMove = null;
+  document.getElementById('gantt-move-modal').style.display = 'none';
+}
+
+async function submitGanttMoveModal() {
+  if (!pendingGanttMove) return;
+  const newDate = document.getElementById('gantt-move-date').value;
+  const newTime = document.getElementById('gantt-move-time').value;
+  if (!newDate) {
+    toast('Choose a date first', 'error');
+    return;
+  }
+  if (!newTime || !newTime.includes(':')) {
+    toast('Choose a valid start time', 'error');
+    return;
+  }
+  const [hourText, minuteText] = newTime.split(':');
+  const startMin = parseInt(hourText, 10) * 60 + parseInt(minuteText, 10);
+  try {
+    const endpoint = `/api/rows/${pendingGanttMove.rowId}/move`;
+    const res = await submitGanttMoveRequest(endpoint, {
+      new_date: newDate,
+      new_start_min: startMin,
+      machine_id: pendingGanttMove.machineId,
+      row_id: pendingGanttMove.rowId,
+      envelope_row_ids: pendingGanttMove.envelopeRowIds || []
+    }, `${newDate} ${minToHHMM(startMin)}`);
+    setLastGanttMove({
+      fromDate: pendingGanttMove.fromDate,
+      fromStartMin: pendingGanttMove.fromStartMin,
+      fromMachineId: pendingGanttMove.fromMachineId,
+    });
+    closeGanttMoveModal();
+    document.getElementById('block-detail').style.display = 'none';
+    const actualDate = res && res.actual_date ? res.actual_date : newDate;
+    if (actualDate) fromDate = actualDate;
+    await loadGantt();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+let ganttTrialDataCache = null;
+let selectedGanttSegmentId = null;
+let selectedGanttBlockId = null;
+let selectedGanttSegment = null;
+
+function trialGanttDisplayIds(block) {
+  const source = String(block?.source_ps_id || '').trim();
+  const display = String(block?.display_ps_id || source || '').trim();
+  const partial = String(block?.display_partial_no || block?.pp_partial_no || '1').trim();
+  return {
+    displayPsId: display || source,
+    displayPartialNo: partial || '1',
+  };
+}
+
+function trialGanttStyleForBlock(block) {
+  const segmentType = String(block?.segment_type || '').toLowerCase();
+  const blockType = String(block?.block_type || '').toUpperCase();
+  const planningStatus = String(block?.planning_status || '').toUpperCase();
+  const executionStatus = String(block?.execution_status || '').toUpperCase();
+  const hasActual = Number(block?.actual_report_count || 0) > 0 || Number(block?.output_qty || 0) > 0;
+  if (blockType === 'REWORK') {
+    return {
+      background: 'rgba(239,68,68,0.82)',
+      borderColor: 'rgba(239,68,68,1)',
+      textColor: '#fff',
+      className: 'segment-rework',
+    };
+  }
+  if (segmentType === 'setup') {
+    return {
+      background: 'rgba(100,116,139,0.55)',
+      borderColor: 'rgba(100,116,139,0.95)',
+      textColor: 'var(--text)',
+      className: 'segment-setup',
+    };
+  }
+  if (hasActual || planningStatus === 'COMPLETED' || executionStatus === 'COMPLETED') {
+    return {
+      background: 'rgba(34,197,94,0.78)',
+      borderColor: 'rgba(34,197,94,1)',
+      textColor: '#fff',
+      className: '',
+    };
+  }
+  return {
+    background: 'rgba(59,130,246,0.72)',
+    borderColor: 'rgba(59,130,246,0.95)',
+    textColor: '#fff',
+    className: '',
+  };
+}
+
+function trialGanttClampMin(value) {
+  return Math.max(DAY_START, Math.min(DAY_END, Number(value || 0)));
+}
+
+async function loadGantt() {
+  const container = document.getElementById('gantt-container');
+  bindGanttHorizontalScroll();
+  try {
+    const numDays = parseInt(document.getElementById('gantt-days').value, 10) || 7;
+    const to = new Date(fromDate + 'T00:00:00');
+    to.setDate(to.getDate() + numDays - 1);
+    const toDate = localISODate(to);
+    document.getElementById('gantt-range-label').textContent = `${fromDate} to ${toDate}`;
+    if (container) {
+      container.innerHTML = '<div class="loading"><div class="spinner"></div> Loading...</div>';
+    }
+    const data = await GET(`/api/trial/gantt?from=${fromDate}&to=${toDate}&include_completed=1`);
+    ganttTrialDataCache = data || {};
+    ganttLastMachines = Array.isArray(data && data.machines) ? data.machines : [];
+    renderGanttMachineFilters(ganttLastMachines);
+    renderGantt(ganttTrialDataCache);
+  } catch (err) {
+    console.error('[Gantt load failed]', err);
+    if (container) {
+      container.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Failed to load Gantt: ${escapeHtml(err && err.message ? err.message : String(err))}</div>`;
+    }
+  }
+}
+
+function renderGantt(data) {
+  const allMachines = Array.isArray(data.machines) ? data.machines : [];
+  const machineTypeById = {};
+  allMachines.forEach(machine => {
+    machineTypeById[String(machine.machine_id)] = String(machine.machine_category || '').trim();
+  });
+  const machines = ganttSelectedMachineType === 'all'
+    ? allMachines
+    : allMachines.filter(machine => String(machine.machine_category || '').trim() === String(ganttSelectedMachineType));
+  const blocks = Array.isArray(data.blocks)
+    ? data.blocks.filter(block => ganttSelectedMachineType === 'all' || String(machineTypeById[String(block.machine_id)] || '') === String(ganttSelectedMachineType))
+    : [];
+  const calendar = Array.isArray(data.calendar) ? data.calendar : [];
+  const dates = Array.isArray(data.dates) ? data.dates : [];
+  const calMap = {};
+  calendar.forEach(c => { calMap[c.work_date] = c; });
+
+  const blocksByCell = {};
+  for (const block of blocks) {
+    const key = `${block.machine_id}|${block.plan_date}`;
+    if (!blocksByCell[key]) blocksByCell[key] = [];
+    blocksByCell[key].push(block);
+  }
+  for (const key of Object.keys(blocksByCell)) {
+    blocksByCell[key].sort((a, b) => (a.start_min - b.start_min) || (a.end_min - b.end_min) || (a.segment_id - b.segment_id));
+  }
+
+  const weekWidth = 60;
+  const dayWidth = 90;
+  const timeWidth = 84;
+  const machineWidth = 150;
+  const totalMins = DAY_END - DAY_START;
+  const totalColumnWidth = machines.length * machineWidth;
+  let html = `<div style="min-width:${weekWidth + dayWidth + timeWidth + totalColumnWidth}px">`;
+  html += `<div style="position:sticky;top:0;z-index:25;background:var(--bg2)">`;
+  html += `<div style="display:flex;border-bottom:1px solid var(--border2)">`;
+  html += `<div style="width:${weekWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Wk</div>`;
+  html += `<div style="width:${dayWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Day / Date</div>`;
+  html += `<div style="width:${timeWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Time</div>`;
+  for (const machine of machines) {
+    html += `<div style="width:${machineWidth}px;flex-shrink:0;padding:8px 4px;background:var(--bg3);border-right:1px solid var(--border);text-align:center">
+      <div style="font-weight:700;font-size:12px">${escapeHtml(machine.machine_code || '')}</div>
+      <div style="font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(machine.machine_category || '')}</div>
+    </div>`;
+  }
+  html += `</div></div>`;
+
+  for (const d of dates) {
+    const displayDate = new Date(`${d}T00:00:00`);
+    const cal = calMap[d];
+    const isWorkingDay = cal ? Number(cal.is_working_day || 0) === 1 : (displayDate.getDay() !== 0 && displayDate.getDay() !== 6);
+    const weekLabel = `WK ${String(Math.floor((displayDate.getDate() - 1) / 7) + 1).padStart(2, '0')}`;
+    html += `<div class="gantt-day-row" style="display:flex;position:relative">`;
+    html += `<div style="width:${weekWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:sticky;left:0;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border);padding:0 4px">
+      <div style="position:sticky;top:44px;display:flex;align-items:center;justify-content:center;min-height:44px;font-size:11px;color:var(--text2);font-weight:700;text-align:center;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'}">${weekLabel}</div>
+    </div>`;
+    html += `<div style="width:${dayWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:sticky;left:${weekWidth}px;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border)">
+      <div style="position:sticky;top:44px;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 6px;text-align:center;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'}">
+        <div style="font-weight:700;color:${d === localISODate() ? 'var(--accent)' : 'var(--text)'}">${displayDate.toLocaleDateString('en', { weekday:'short' })}</div>
+        <div style="font-size:11px;color:var(--text2)">${displayDate.getDate()}/${displayDate.getMonth() + 1}</div>
+        ${!isWorkingDay ? '<div style="font-size:10px;color:var(--red)">OFF</div>' : ''}
+      </div>
+    </div>`;
+    html += `<div style="width:${timeWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:sticky;left:${weekWidth + dayWidth}px;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border)">
+      <div style="position:relative;height:${ROW_HEIGHT}px;display:flex;align-items:center;justify-content:center">
+        ${Array.from({length: Math.floor((DAY_END - DAY_START) / 60)}, (_, idx) => {
+          const m = DAY_START + idx * 60;
+          const top = ((m - DAY_START) / totalMins) * ROW_HEIGHT;
+          return `<div style="position:absolute;top:${top}px;left:0;right:0;font-size:10px;color:var(--text3);text-align:center">${minToHHMM(m)}</div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+    for (const machine of machines) {
+      const dayBlocks = blocksByCell[`${machine.machine_id}|${d}`] || [];
+      html += `<div data-machine-id-col="${machine.machine_id}" data-date-drop="${d}" style="width:${machineWidth}px;flex-shrink:0;height:${ROW_HEIGHT}px;position:relative;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${!isWorkingDay ? 'rgba(239,68,68,0.05)' : 'transparent'}">`;
+
+      for (let m = DAY_START; m < DAY_END; m += 60) {
+        const top = ((m - DAY_START) / totalMins) * ROW_HEIGHT;
+        html += `<div style="position:absolute;left:0;right:0;top:${top}px;border-top:1px solid rgba(100,116,139,0.18);pointer-events:none"></div>`;
+      }
+
+      for (const block of dayBlocks) {
+        const startMin = trialGanttClampMin(block.start_min);
+        const endMin = trialGanttClampMin(block.end_min);
+        if (endMin <= startMin) continue;
+        const top = ((startMin - DAY_START) / totalMins) * ROW_HEIGHT;
+        const height = Math.max(18, ((endMin - startMin) / totalMins) * ROW_HEIGHT);
+        const style = trialGanttStyleForBlock(block);
+        const ids = trialGanttDisplayIds(block);
+        const segmentType = String(block.segment_type || '').toLowerCase();
+        const segmentText = segmentType === 'setup' ? 'Setup' : (segmentType ? segmentType.replace(/_/g, ' ') : 'Production');
+        html += `<div class="gantt-block ${style.className}" data-segment-id="${escapeHtml(block.segment_id || 0)}" data-block-id="${escapeHtml(block.block_id || 0)}"
+          data-machine-id="${escapeHtml(block.machine_id || 0)}" data-date="${escapeHtml(block.plan_date || '')}"
+          data-start="${startMin}" data-end="${endMin}"
+          data-ps-id="${escapeHtml(block.source_ps_id || '')}" data-op-no="${escapeHtml(block.source_op_no || '')}"
+          style="position:absolute;left:4px;right:4px;top:${top}px;height:${height}px;background:${style.background};border:1px solid ${style.borderColor};border-radius:4px;padding:2px 4px;font-size:10px;color:${style.textColor};overflow:hidden;cursor:pointer;z-index:5;opacity:1"
+          onclick="showBlockDetail('${escapeJs(String(block.segment_id || ''))}', '${escapeJs(String(block.block_id || ''))}')">
+          <div style="position:relative;z-index:2;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(ids.displayPsId)}</div>
+          <div style="position:relative;z-index:2;font-size:9px;opacity:0.9">${escapeHtml(ids.displayPartialNo ? `Partial ${ids.displayPartialNo}` : '')}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(block.source_op_no || block.operation_name || '')}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(segmentText)} · ${escapeHtml(block.machine_code || '')}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Qty: ${fmt(block.qty)} u${block.output_qty > 0 ? ` | Out: ${fmt(block.output_qty)} u` : ''}</div>
+          <div style="position:relative;z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Time: ${minToHHMM(startMin)}-${minToHHMM(endMin)}</div>
+        </div>`;
+      }
+
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  const container = document.getElementById('gantt-container');
+  if (container) container.innerHTML = html;
+  bindTrialGanttBlockEvents();
+}
+
+function bindTrialGanttBlockEvents() {
+  document.querySelectorAll('.gantt-block').forEach(el => {
+    el.setAttribute('draggable', 'false');
+  });
+}
+
+function showBlockDetail(segmentId, blockId) {
+  const data = ganttTrialDataCache || {};
+  const blocks = Array.isArray(data.blocks) ? data.blocks : [];
+  const segment = blocks.find(b => String(b.segment_id) === String(segmentId) && String(b.block_id) === String(blockId))
+    || blocks.find(b => String(b.segment_id) === String(segmentId))
+    || blocks.find(b => String(b.block_id) === String(blockId))
+    || null;
+  if (!segment) return;
+
+  selectedGanttSegment = segment;
+  selectedGanttSegmentId = Number(segment.segment_id || 0) || null;
+  selectedGanttBlockId = Number(segment.block_id || 0) || null;
+  selectedGanttBlock = segment;
+  selectedGanttRowId = selectedGanttSegmentId;
+  selectedGanttEnvelopeRowIds = [selectedGanttSegmentId].filter(Boolean);
+
+  const ids = trialGanttDisplayIds(segment);
+  const panel = document.getElementById('block-detail');
+  const actualSummary = Number(segment.actual_report_count || 0) > 0
+    ? `${fmt(segment.actual_report_count)} reports`
+    : 'No actuals reported';
+  document.getElementById('bd-title').textContent = 'Segment Details';
+  document.getElementById('bd-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div><div class="field-hint">Process Sheet</div><strong>${escapeHtml(ids.displayPsId || '–')}</strong></div>
+      <div><div class="field-hint">Partial</div><strong>${escapeHtml(ids.displayPartialNo || '1')}</strong></div>
+      <div><div class="field-hint">Op</div><strong>${escapeHtml((segment.source_op_no || '–') + (segment.operation_name ? ` / ${segment.operation_name}` : ''))}</strong></div>
+      <div><div class="field-hint">Segment Type</div>${escapeHtml(segment.segment_type || '–')}</div>
+      <div><div class="field-hint">Machine</div>${escapeHtml(segment.machine_code || '–')}</div>
+      <div><div class="field-hint">Date</div>${escapeHtml(segment.plan_date || '–')}</div>
+      <div><div class="field-hint">Time</div>${minToHHMM(segment.start_min || 0)} – ${minToHHMM(segment.end_min || 0)}</div>
+      <div><div class="field-hint">Qty</div>${fmt(segment.qty)} / ${fmt(segment.scheduled_qty)} scheduled</div>
+      <div><div class="field-hint">Output</div>${fmt(segment.output_qty)} / Reject ${fmt(segment.reject_qty)}</div>
+      <div><div class="field-hint">Status</div>${escapeHtml(segment.planning_status || segment.status || '–')}</div>
+      <div><div class="field-hint">Execution</div>${escapeHtml(segment.execution_status || '–')}</div>
+      <div><div class="field-hint">Group</div>${escapeHtml(segment.group_label || '–')}</div>
+      <div><div class="field-hint">Actuals</div>${escapeHtml(actualSummary)}</div>
+    </div>
+    ${segment.remarks ? `<div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg3)"><div class="field-hint" style="margin-bottom:6px">Remarks</div>${escapeHtml(segment.remarks)}</div>` : ''}
+    <div style="margin-top:10px;font-size:11px;color:var(--text3)">Block ${escapeHtml(String(segment.block_id || ''))} · Segment ${escapeHtml(String(segment.segment_id || ''))}</div>
+  `;
+  panel.style.display = 'block';
+}
+
+function initGanttDragDrop() {}
+function handleGanttDrop() {}
+function undoLastGanttMove() {
+  toast('Legacy row moves are disabled on the TRIAL Gantt.', 'info');
+}
+function moveBlockGantt() {
+  toast('Legacy row moves are disabled on the TRIAL Gantt.', 'info');
+}
+function toggleLockGantt() {
+  toast('Row-level Gantt actions are disabled on the TRIAL Gantt.', 'info');
+}
+function saveGanttActualOutput() {
+  toast('Row-level Gantt actions are disabled on the TRIAL Gantt.', 'info');
+}
+function clearGanttActualOutput() {
+  toast('Row-level Gantt actions are disabled on the TRIAL Gantt.', 'info');
+}
+function deleteBlockGantt() {
+  toast('Row-level Gantt actions are disabled on the TRIAL Gantt.', 'info');
+}
+function archiveBlockGantt() {
+  toast('Row-level Gantt actions are disabled on the TRIAL Gantt.', 'info');
+}
+function submitGanttMoveModal() {
+  toast('Legacy row moves are disabled on the TRIAL Gantt.', 'info');
+}
+
+loadGantt();
+</script>
+{% endblock %}
+
+
+
+

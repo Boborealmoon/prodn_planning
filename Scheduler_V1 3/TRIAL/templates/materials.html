@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+{% block title %}Material Readiness{% endblock %}
+{% block page_title %}
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Material</span>
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Readiness.</span>
+{% endblock %}
+{% block page_actions %}
+  <div class="trial-toolbar">
+    <a class="btn btn-ghost btn-sm" href="/">Back to Planner</a>
+  </div>
+{% endblock %}
+{% block content %}
+<style>
+  .material-shell {
+    display: grid;
+    gap: 12px;
+  }
+  .material-filter-card {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(26,28,29,0.08);
+    border-radius: 18px;
+    background: rgba(255,255,255,0.78);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.04);
+  }
+  .material-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: center;
+  }
+  .material-filter-label {
+    font-size: 11px;
+    font-weight: 900;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    min-width: 52px;
+  }
+  .material-filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .material-filter-group label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text2);
+  }
+  .material-search {
+    flex: 1 1 240px;
+    min-width: 220px;
+    display: grid;
+    gap: 4px;
+  }
+  .material-search span {
+    font-size: 11px;
+    font-weight: 900;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .material-search input {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.85);
+    border-radius: 10px;
+    padding: 7px 9px;
+    font: inherit;
+    font-size: 12px;
+  }
+  .material-note {
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.4;
+  }
+  .material-table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(26,28,29,0.08);
+    border-radius: 18px;
+    background: rgba(255,255,255,0.84);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.04);
+  }
+  .material-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 1260px;
+  }
+  .material-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: rgba(248,249,251,0.98);
+    border-bottom: 1px solid rgba(26,28,29,0.08);
+    padding: 10px 12px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text3);
+    text-align: left;
+    white-space: nowrap;
+  }
+  .material-table tbody td {
+    padding: 10px 12px;
+    border-top: 1px solid rgba(26,28,29,0.06);
+    vertical-align: top;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .material-table tbody tr:hover {
+    background: rgba(59,130,246,0.025);
+  }
+  .material-cell-main {
+    display: grid;
+    gap: 3px;
+  }
+  .material-cell-title {
+    font-weight: 800;
+    color: var(--text);
+  }
+  .material-cell-sub {
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.35;
+  }
+  .material-edit {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.9);
+    border-radius: 10px;
+    padding: 7px 9px;
+    font: inherit;
+    font-size: 12px;
+  }
+  .material-edit-textarea {
+    resize: vertical;
+    min-height: 52px;
+  }
+  .material-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(59,130,246,0.15);
+    background: rgba(59,130,246,0.08);
+    color: #1f4ea2;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .material-chip.pending {
+    background: rgba(245,158,11,0.14);
+    border-color: rgba(245,158,11,0.22);
+    color: #8a5200;
+  }
+  .material-chip.warning {
+    background: rgba(245,158,11,0.12);
+    border-color: rgba(245,158,11,0.22);
+    color: #9a5b00;
+  }
+  .material-chip.late {
+    background: rgba(239,68,68,0.12);
+    border-color: rgba(239,68,68,0.22);
+    color: #991b1b;
+  }
+  .material-empty {
+    padding: 18px;
+    border-radius: 16px;
+    border: 1px dashed var(--border);
+    color: var(--text3);
+    background: rgba(255,255,255,0.5);
+    font-size: 12px;
+  }
+  .material-cell-machine {
+    white-space: nowrap;
+  }
+  .material-cell-date {
+    white-space: nowrap;
+  }
+  .material-cell-status {
+    min-width: 180px;
+  }
+  @media (max-width: 900px) {
+    .material-table {
+      min-width: 1120px;
+    }
+  }
+</style>
+
+<div class="material-shell">
+  <div id="material-filter-shell"></div>
+  <div id="material-loading" class="loading"><div class="spinner"></div> Loading material requirements...</div>
+  <div id="material-table-shell" style="display:none;"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let materialState = { requirements: [] };
+let materialFilters = {
+  include_unplanned: false,
+  include_active: false,
+  include_completed: false,
+  search: '',
+};
+
+function materialEscapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function materialFilterQuery() {
+  const qs = new URLSearchParams();
+  qs.set('include_unplanned', materialFilters.include_unplanned ? '1' : '0');
+  qs.set('include_active', materialFilters.include_active ? '1' : '0');
+  qs.set('include_completed', materialFilters.include_completed ? '1' : '0');
+  if (String(materialFilters.search || '').trim()) {
+    qs.set('search', String(materialFilters.search || '').trim());
+  }
+  return qs.toString();
+}
+
+function materialSetFilter(field, value) {
+  materialFilters[field] = !!value;
+  loadMaterialRequirements();
+}
+
+const materialSearchChanged = debounce(value => {
+  materialFilters.search = String(value || '');
+  loadMaterialRequirements();
+}, 220);
+
+function materialFilterShellHtml() {
+  return `
+    <div class="material-filter-card">
+      <div class="material-filter-row">
+        <div class="material-filter-label">Filters</div>
+        <div class="material-filter-group">
+          <label><input type="checkbox" ${materialFilters.include_unplanned ? 'checked' : ''} onchange="materialSetFilter('include_unplanned', this.checked)">Include unplanned</label>
+          <label><input type="checkbox" ${materialFilters.include_active ? 'checked' : ''} onchange="materialSetFilter('include_active', this.checked)">Include active</label>
+          <label><input type="checkbox" ${materialFilters.include_completed ? 'checked' : ''} onchange="materialSetFilter('include_completed', this.checked)">Include completed</label>
+        </div>
+        <div class="material-search">
+          <span>Search</span>
+          <input type="search" placeholder="NPS, part, material, supplier..." value="${materialEscapeHtml(materialFilters.search || '')}" oninput="materialSearchChanged(this.value)">
+        </div>
+      </div>
+      <div class="material-note">Default view shows planned orders that have not started execution yet.</div>
+    </div>
+  `;
+}
+
+function materialStatusChip(status) {
+  const s = status || {};
+  if (!s.label || String(s.severity || '') === 'none') return '';
+  const severity = String(s.severity || 'warning');
+  return `<span class="material-chip ${severity}">${materialEscapeHtml(s.label)}</span>`;
+}
+
+async function loadMaterialRequirements() {
+  const loading = document.getElementById('material-loading');
+  const shell = document.getElementById('material-table-shell');
+  const filterShell = document.getElementById('material-filter-shell');
+  if (filterShell) filterShell.innerHTML = materialFilterShellHtml();
+  if (loading) loading.style.display = 'block';
+  if (shell) shell.style.display = 'none';
+  try {
+    const data = await GET(`/api/materials/requirements?${materialFilterQuery()}`);
+    materialState = data || { requirements: [] };
+    renderMaterialRequirements();
+  } catch (e) {
+    const message = e.message || 'Unable to load material requirements';
+    if (shell) {
+      shell.innerHTML = `<div class="material-empty">${materialEscapeHtml(message)}</div>`;
+      shell.style.display = 'block';
+    }
+  } finally {
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+function renderMaterialRequirements() {
+  const shell = document.getElementById('material-table-shell');
+  const rows = Array.isArray(materialState.requirements) ? materialState.requirements : [];
+  if (!shell) return;
+  if (!rows.length) {
+    shell.innerHTML = `<div class="material-empty">No material requirements match these filters.</div>`;
+    shell.style.display = 'block';
+    return;
+  }
+
+  shell.innerHTML = `
+    <div class="material-table-wrap">
+      <table class="material-table">
+        <thead>
+          <tr>
+            <th>NPS Number</th>
+            <th>Partial</th>
+            <th>Part No</th>
+            <th>Part Description</th>
+            <th>BOM</th>
+            <th>Material</th>
+            <th>Qty Needed</th>
+            <th>First Planned Start</th>
+            <th>Machine</th>
+            <th>Supply Status</th>
+            <th>Expected Ready Date</th>
+            <th>Supplier Ref</th>
+            <th>Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(renderMaterialRow).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  shell.style.display = 'block';
+}
+
+function renderMaterialRow(row) {
+  const status = row.material_status || {};
+  return `
+    <tr data-requirement-id="${materialEscapeHtml(row.requirement_id)}">
+      <td><div class="material-cell-main"><div class="material-cell-title">${materialEscapeHtml(row.base_ps_number || row.ps_id || '')}</div></div></td>
+      <td>${materialEscapeHtml(row.partial || '') || '—'}</td>
+      <td>${materialEscapeHtml(row.part_no || '') || '—'}</td>
+      <td>${materialEscapeHtml(row.part_desc || '') || '—'}</td>
+      <td>${materialEscapeHtml(row.bom_code || '') || '—'}</td>
+      <td>
+        <div class="material-cell-main">
+          <div class="material-cell-title">${materialEscapeHtml(row.material_inventory_code || row.material_code || '') || '—'}</div>
+          <div class="material-cell-sub">${materialEscapeHtml(row.material_description || row.material_desc || '') || ''}</div>
+          ${materialStatusChip(status)}
+        </div>
+      </td>
+      <td>${fmt(row.material_qty_needed || 0, 0)} ${materialEscapeHtml(row.material_uom || '')}</td>
+      <td class="material-cell-date">${materialEscapeHtml(fmtDate(row.first_planned_start || '')) || '—'}</td>
+      <td class="material-cell-machine">${materialEscapeHtml(row.machine_code || '') || '—'}</td>
+      <td class="material-cell-status">
+        <select class="material-edit" onchange="saveMaterialRequirement(${Number(row.requirement_id || 0)}, { supply_status: this.value })">
+          ${['PENDING_CONFIRMATION', 'READY', 'NOT_READY', 'ORDERED', 'DELAYED', 'NOT_REQUIRED'].map(statusValue => `
+            <option value="${statusValue}" ${String(row.supply_status || 'PENDING_CONFIRMATION') === statusValue ? 'selected' : ''}>${statusValue}</option>
+          `).join('')}
+        </select>
+      </td>
+      <td><input class="material-edit" type="date" value="${materialEscapeHtml(row.expected_ready_date || '')}" onchange="saveMaterialRequirement(${Number(row.requirement_id || 0)}, { expected_ready_date: this.value })"></td>
+      <td><input class="material-edit" type="text" value="${materialEscapeHtml(row.supplier_ref || '')}" onblur="saveMaterialRequirement(${Number(row.requirement_id || 0)}, { supplier_ref: this.value })"></td>
+      <td><textarea class="material-edit material-edit-textarea" rows="2" onblur="saveMaterialRequirement(${Number(row.requirement_id || 0)}, { remarks: this.value })">${materialEscapeHtml(row.remarks || '')}</textarea></td>
+    </tr>
+  `;
+}
+
+async function saveMaterialRequirement(requirementId, patch) {
+  const row = (materialState.requirements || []).find(item => String(item.requirement_id) === String(requirementId));
+  if (!row) return;
+  try {
+    const nextPatch = { ...patch };
+    if (
+      Object.prototype.hasOwnProperty.call(nextPatch, 'expected_ready_date') &&
+      String(nextPatch.expected_ready_date || '').trim() &&
+      String(row.supply_status || 'PENDING_CONFIRMATION').toUpperCase() === 'PENDING_CONFIRMATION' &&
+      !Object.prototype.hasOwnProperty.call(nextPatch, 'supply_status')
+    ) {
+      nextPatch.supply_status = 'ORDERED';
+    }
+    await PUT(`/api/materials/requirements/${requirementId}`, {
+      ...nextPatch,
+      updated_by: 'planner',
+    });
+    await loadMaterialRequirements();
+    toast('Material requirement saved', 'success');
+  } catch (e) {
+    toast('Material save failed: ' + e.message, 'error');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', loadMaterialRequirements);
+</script>
+{% endblock %}

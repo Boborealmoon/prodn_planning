@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Calendar{% endblock %}
+{% block page_title %}Working Calendar{% endblock %}
+{% block page_actions %}
+<button class="btn btn-ghost" onclick="openBulkUpdate()">Bulk Update</button>
+{% endblock %}
+{% block content %}
+<div class="dashboard-section">
+  <div class="dashboard-section-header">
+    <div class="dashboard-section-title">Monthly Calendar</div>
+    <div class="dashboard-note">Use month navigation to review and update working days in one view.</div>
+  </div>
+
+  <div class="toolbar" style="justify-content:space-between;align-items:center">
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-ghost" onclick="moveMonth(-1)">Previous Month</button>
+      <button class="btn btn-ghost" onclick="goToTodayMonth()">Current Month</button>
+      <button class="btn btn-ghost" onclick="moveMonth(1)">Next Month</button>
+    </div>
+    <div id="calendar-month-label" style="font-size:18px;font-weight:700"></div>
+    <div style="display:flex;gap:6px">
+      <span class="badge badge-green">Working day</span>
+      <span class="badge badge-red">Off day</span>
+    </div>
+  </div>
+
+  <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px"></div>
+</div>
+
+<script>
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const todayDate = new Date();
+let visibleMonth = new Date(todayDate.getFullYear(), todayDate.getMonth(), 1, 12, 0, 0, 0);
+
+function localDate(year, month, day) {
+  return new Date(year, month, day, 12, 0, 0, 0);
+}
+
+function parseLocalDate(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return localDate(year, month - 1, day);
+}
+
+function formatLocalDate(dateObj) {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function monthBounds(dateObj) {
+  const start = localDate(dateObj.getFullYear(), dateObj.getMonth(), 1);
+  const end = localDate(dateObj.getFullYear(), dateObj.getMonth() + 1, 0);
+  return { start, end };
+}
+
+function monthLabel(dateObj) {
+  return dateObj.toLocaleDateString('en-SG', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function goToTodayMonth() {
+  visibleMonth = localDate(todayDate.getFullYear(), todayDate.getMonth(), 1);
+  loadCalendar();
+}
+
+function moveMonth(offset) {
+  visibleMonth = localDate(visibleMonth.getFullYear(), visibleMonth.getMonth() + offset, 1);
+  loadCalendar();
+}
+
+async function loadCalendar() {
+  const { start, end } = monthBounds(visibleMonth);
+  document.getElementById('calendar-month-label').textContent = monthLabel(visibleMonth);
+  const days = await GET(`/api/calendar?from=${formatLocalDate(start)}&to=${formatLocalDate(end)}`);
+  renderCalendar(days, start, end);
+}
+
+function renderCalendar(days, start, end) {
+  const grid = document.getElementById('cal-grid');
+  const dayMap = {};
+  days.forEach(d => {
+    dayMap[d.work_date] = d;
+  });
+
+  let html = DAY_NAMES.map(d => `
+    <div style="text-align:center;font-size:11px;font-weight:700;color:var(--text3);padding:6px 4px;text-transform:uppercase;letter-spacing:0.08em">
+      ${d}
+    </div>
+  `).join('');
+
+  const calendarStart = localDate(start.getFullYear(), start.getMonth(), 1 - start.getDay());
+  const calendarEnd = localDate(end.getFullYear(), end.getMonth(), end.getDate() + (6 - end.getDay()));
+  const todayStr = formatLocalDate(todayDate);
+
+  let current = new Date(calendarStart);
+  while (current <= calendarEnd) {
+    const ds = formatLocalDate(current);
+    const cal = dayMap[ds];
+    const isCurrentMonth = current.getMonth() === visibleMonth.getMonth() && current.getFullYear() === visibleMonth.getFullYear();
+    const isWeekend = current.getDay() === 0 || current.getDay() === 6;
+    const isWorking = cal ? Number(cal.is_working_day) === 1 : !isWeekend;
+    const isToday = ds === todayStr;
+    const note = cal ? (cal.note || '') : '';
+
+    html += `<div onclick="toggleDay('${ds}', ${isWorking ? 0 : 1})"
+      style="
+        min-height:92px;
+        padding:10px 8px;
+        border-radius:10px;
+        cursor:pointer;
+        background:${isWorking ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)'};
+        border:1px solid ${isToday ? 'var(--accent)' : isWorking ? 'rgba(34,197,94,0.30)' : 'rgba(239,68,68,0.24)'};
+        opacity:${isCurrentMonth ? '1' : '0.45'};
+        transition:all 0.12s ease;
+      "
+      title="${note || (isWorking ? 'Working day' : 'Off day')}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:11px;color:var(--text3);font-weight:600">${DAY_NAMES[current.getDay()]}</div>
+        <div style="font-size:14px;font-weight:${isToday ? '800' : '700'};color:${isToday ? 'var(--accent)' : 'var(--text)'}">${current.getDate()}</div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:${isWorking ? 'var(--green)' : 'var(--red)'};margin-bottom:6px">
+        ${isWorking ? 'Working' : 'Off'}
+      </div>
+      <div style="font-size:11px;color:var(--text3);min-height:30px;overflow:hidden;word-break:break-word">
+        ${note || '&nbsp;'}
+      </div>
+    </div>`;
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  grid.innerHTML = html;
+}
+
+async function toggleDay(date, isWorking) {
+  await POST('/api/calendar', { updates: [{ work_date: date, is_working_day: isWorking, note: '' }] });
+  loadCalendar();
+}
+
+function openBulkUpdate() {
+  const { start, end } = monthBounds(visibleMonth);
+  openModal('Bulk Calendar Update', `
+    <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Mark a date range as working or off days.</p>
+    <div class="field-row">
+      <div class="field"><label>From Date</label><input type="date" id="bulk-from" value="${formatLocalDate(start)}"></div>
+      <div class="field"><label>To Date</label><input type="date" id="bulk-to" value="${formatLocalDate(end)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Mark As</label>
+        <select id="bulk-type">
+          <option value="1">Working Day</option>
+          <option value="0">Off Day</option>
+        </select>
+      </div>
+      <div class="field"><label>Note (optional)</label><input id="bulk-note" placeholder="e.g. Public Holiday"></div>
+    </div>
+    <div class="field">
+      <label><input type="checkbox" id="bulk-skip-weekends" checked> Skip weekends when marking working days</label>
+    </div>
+    <div class="modal-footer" style="padding:0;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitBulk()">Apply</button>
+    </div>`);
+}
+
+async function submitBulk() {
+  const fromValue = document.getElementById('bulk-from').value;
+  const toValue = document.getElementById('bulk-to').value;
+  if (!fromValue || !toValue) {
+    toast('Invalid date range', 'error');
+    return;
+  }
+
+  const from = parseLocalDate(fromValue);
+  const to = parseLocalDate(toValue);
+  if (from > to) {
+    toast('Invalid date range', 'error');
+    return;
+  }
+
+  const type = parseInt(document.getElementById('bulk-type').value, 10);
+  const note = document.getElementById('bulk-note').value;
+  const skipWeekends = document.getElementById('bulk-skip-weekends').checked;
+
+  const updates = [];
+  let cur = new Date(from);
+  while (cur <= to) {
+    const skip = skipWeekends && type === 1 && (cur.getDay() === 0 || cur.getDay() === 6);
+    if (!skip) {
+      updates.push({
+        work_date: formatLocalDate(cur),
+        is_working_day: type,
+        note,
+      });
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  await POST('/api/calendar', { updates });
+  toast(`Updated ${updates.length} days`, 'success');
+  closeModal();
+  loadCalendar();
+}
+
+loadCalendar();
+</script>
+{% endblock %}

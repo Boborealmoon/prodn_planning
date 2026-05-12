@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}ERP Sync{% endblock %}
+{% block page_title %}ERP Sync{% endblock %}
+{% block page_actions %}
+<button class="btn btn-ghost" onclick="document.getElementById('erp-file').click()">Choose Workbook</button>
+<button class="btn btn-ghost" onclick="document.getElementById('active-orders-file').click()">Choose Active Orders File</button>
+<button class="btn btn-primary" onclick="runErpSync()">Run Sync</button>
+{% endblock %}
+{% block content %}
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header">
+    <h3>Workbook Upload</h3>
+  </div>
+  <div class="card-body">
+    <input id="erp-file" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" style="display:none" onchange="updateSelectedFile()">
+    <input id="active-orders-file" type="file" accept=".xlsx,.xlsm,.xltx,.xltm" style="display:none" onchange="updateSelectedFile()">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <div id="erp-file-name" style="color:var(--text2)">No workbook selected</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('erp-file').click()">Browse</button>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <div id="active-orders-file-name" style="color:var(--text2)">No active-orders workbook selected</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('active-orders-file').click()">Browse Active Orders</button>
+    </div>
+    <div style="color:var(--text3);font-size:13px;line-height:1.5">
+      Required sheets:
+      <code>ProcessSheets</code>,
+      <code>Materials (Per PS)</code>,
+      <code>Material (Per BOM)</code>,
+      <code>BOM_op_stage</code>,
+      <code>Workorder Tracker</code>
+      <br>
+      Optional separate workbook:
+      <code>Active Orders</code> or <code>ActiveOrders</code> sheet
+      <span style="color:var(--text3)">If uploaded, this becomes the source of truth for whether a PS is still active.</span>
+      <br>
+      You can run:
+      <strong>full ERP sync</strong> with the main workbook,
+      or <strong>status-only sync</strong> with just the active-orders workbook.
+    </div>
+  </div>
+</div>
+
+<div class="grid-2" style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:16px">
+  <div class="card">
+    <div class="card-header">
+      <h3>Last Sync Result</h3>
+    </div>
+    <div class="card-body" id="erp-sync-result">
+      <div class="empty-state" style="padding:24px 16px">
+        <p>Upload a workbook to start the first ERP sync.</p>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h3>Recent Syncs</h3>
+    </div>
+    <div class="card-body" id="erp-sync-history">
+      <div class="loading"><div class="spinner"></div> Loading...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function updateSelectedFile() {
+  const input = document.getElementById('erp-file');
+  const label = document.getElementById('erp-file-name');
+  label.textContent = input.files && input.files.length ? input.files[0].name : 'No workbook selected';
+  const activeInput = document.getElementById('active-orders-file');
+  const activeLabel = document.getElementById('active-orders-file-name');
+  activeLabel.textContent = activeInput.files && activeInput.files.length ? activeInput.files[0].name : 'No active-orders workbook selected';
+}
+
+function renderSyncSummary(summary) {
+  if (!summary) return '<div class="empty-state" style="padding:24px 16px"><p>No sync summary yet.</p></div>';
+  const cards = Object.entries(summary).map(([name, stats]) => `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3)">
+      <div style="font-weight:700;margin-bottom:8px;text-transform:capitalize">${name.replace('_',' ')}</div>
+      <div style="font-size:13px;color:var(--text2)">Inserted: <strong>${stats.inserted}</strong></div>
+      <div style="font-size:13px;color:var(--text2)">Updated: <strong>${stats.updated}</strong></div>
+      <div style="font-size:13px;color:var(--text2)">Skipped: <strong>${stats.skipped}</strong></div>
+    </div>
+  `).join('');
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">${cards}</div>`;
+}
+
+function renderSyncHistory(items) {
+  if (!items || !items.length) return '<div class="empty-state" style="padding:24px 16px"><p>No syncs yet.</p></div>';
+  return `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Workbook</th>
+            <th>Status</th>
+            <th>Inserted</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(item => `
+            <tr>
+              <td>${item.completed_at || item.started_at || '–'}</td>
+              <td>${item.workbook_name || '–'}</td>
+              <td>${item.status}</td>
+              <td>${item.inserted_count || 0}</td>
+              <td>${item.updated_count || 0}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadErpSyncHistory() {
+  const data = await GET('/api/erp-sync/history');
+  document.getElementById('erp-sync-history').innerHTML = renderSyncHistory(data);
+}
+
+async function runErpSync() {
+  const input = document.getElementById('erp-file');
+  const activeOrdersInput = document.getElementById('active-orders-file');
+  if ((!input.files || !input.files.length) && (!activeOrdersInput.files || !activeOrdersInput.files.length)) {
+    toast('Choose an ERP workbook or an active-orders workbook first', 'error');
+    return;
+  }
+  const form = new FormData();
+  if (input.files && input.files.length) {
+    form.append('file', input.files[0]);
+  }
+  if (activeOrdersInput.files && activeOrdersInput.files.length) {
+    form.append('active_orders_file', activeOrdersInput.files[0]);
+  }
+  document.getElementById('erp-sync-result').innerHTML = loadingEl();
+  try {
+    const res = await fetch('/api/erp-sync/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    document.getElementById('erp-sync-result').innerHTML = renderSyncSummary(data.summary);
+    toast('ERP workbook synced', 'success');
+    loadErpSyncHistory();
+  } catch (e) {
+    document.getElementById('erp-sync-result').innerHTML = `<div class="empty-state" style="padding:24px 16px"><p>${e.message}</p></div>`;
+    toast(e.message, 'error');
+  }
+}
+
+loadErpSyncHistory();
+</script>
+{% endblock %}

@@ -1,0 +1,71 @@
+============================================================
+ LOCAL PRODUCTION PLANNER - ENVIRONMENT NOTES
+============================================================
+
+REQUIREMENTS
+------------
+- Python 3.8 or higher (3.10+ recommended)
+  Download: https://www.python.org/downloads/
+  IMPORTANT: During install, check "Add Python to PATH"
+
+- Flask 3.0+ (installed automatically by INSTALL_DEPS.bat)
+
+- SQLite (built into Python — no separate install needed)
+
+- A modern web browser (Chrome, Edge, Firefox)
+
+NO OTHER DEPENDENCIES. No Node.js, no Java, no .NET required.
+
+
+FIRST-TIME SETUP
+----------------
+1. Unzip the folder to any location (e.g. C:\ProductionPlanner\)
+2. Double-click INSTALL_DEPS.bat
+3. Double-click RUN_APP.bat
+4. Browser should open automatically at http://localhost:5000
+
+
+TROUBLESHOOTING
+---------------
+
+Problem: "'python' is not recognized"
+Solution: Reinstall Python and check "Add Python to PATH"
+          Or try using 'py' instead of 'python' - edit RUN_APP.bat
+          and replace 'python' with 'py'
+
+Problem: "Port 5000 already in use"
+Solution: Another program is using port 5000.
+          Edit app.py, last line: change port=5000 to port=5001
+          Then open http://localhost:5001 instead.
+
+Problem: "Permission denied" errors
+Solution: Move the folder out of Program Files.
+          Recommended location: C:\Users\YourName\ProductionPlanner\
+
+Problem: Browser doesn't open automatically
+Solution: Manually open http://localhost:5000 in your browser.
+
+Problem: Database errors after an update
+Solution: Run RESET_DEMO_DB.bat to restore a clean demo database.
+          WARNING: This deletes all your data.
+
+
+DATA STORAGE
+------------
+All data is stored in planner.db (SQLite database file).
+This file is created automatically on first run.
+Back up this file to preserve your planning data.
+
+
+NETWORK
+-------
+The app runs only on your local machine (localhost).
+It is NOT accessible from other computers on the network
+unless you specifically configure it (not recommended for V1).
+
+
+UPGRADING
+---------
+To upgrade: replace the source files but keep planner.db.
+If the schema changes, run RESET_DEMO_DB.bat (loses data)
+or apply migrations manually.

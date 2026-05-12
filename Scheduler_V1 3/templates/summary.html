@@ -1,0 +1,1123 @@
+{% extends "base.html" %}
+{% block title %}Summary{% endblock %}
+{% block page_title %}
+<span class="summary-title-line">Machine</span>
+<span class="summary-title-line">Performance</span>
+<span class="summary-title-line">Summary.</span>
+{% endblock %}
+{% block page_actions %}
+<div class="summary-actions">
+  <div class="summary-filter-block">
+    <div class="summary-filter-label">Range</div>
+    <div class="summary-range-row">
+      <div class="range-segment" id="range-mode">
+        <button class="btn" data-range="today" onclick="changeRangeMode('today')">Today</button>
+        <button class="btn" data-range="week" onclick="changeRangeMode('week')">7 Days</button>
+        <button class="btn" data-range="month" onclick="changeRangeMode('month')">Month</button>
+        <button class="btn" data-range="30" onclick="changeRangeMode('30')">30 Days</button>
+      </div>
+      <button class="btn btn-ghost custom-range-btn" id="custom-range-btn" onclick="openCustomRangeModal()">Custom dates</button>
+    </div>
+    <div class="summary-filter-hint" id="range-hint">Choose a reporting window. Custom opens a click-select calendar.</div>
+  </div>
+  <div class="summary-filter-block">
+    <div class="summary-filter-label">Machine Type</div>
+    <div class="chip-row" id="machine-type-chips"></div>
+    <div class="summary-filter-hint" id="machine-type-hint">Tap a chip to switch instantly.</div>
+  </div>
+</div>
+{% endblock %}
+{% block content %}
+<style>
+  .summary-shell {
+    position: relative;
+  }
+  .summary-shell::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 18% 10%, rgba(255,255,255,0.05), transparent 26%),
+      radial-gradient(circle at 82% 12%, rgba(255,255,255,0.03), transparent 22%);
+    z-index: 0;
+  }
+  .summary-page {
+    position: relative;
+    z-index: 1;
+  }
+  .summary-title-line {
+    display: block;
+  }
+  .page-header {
+    align-items: flex-end;
+  }
+  .page-header-copy h1 {
+    font-size: 50px;
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+    font-weight: 900;
+  }
+  .summary-actions {
+    display: flex;
+    align-items: stretch;
+    justify-content: flex-end;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .summary-filter-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: rgba(255,255,255,0.56);
+    box-shadow: var(--shadow-sm);
+  }
+  .summary-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .summary-filter input {
+    min-width: 140px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.72);
+    color: var(--text);
+    font: inherit;
+  }
+  .summary-filter-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text3);
+    font-weight: 800;
+  }
+  .summary-range-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .summary-filter-hint {
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.4;
+  }
+  .range-segment {
+    display: inline-flex;
+    padding: 5px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    gap: 4px;
+    flex-wrap: wrap;
+    backdrop-filter: blur(16px);
+  }
+  .range-segment .btn {
+    border: 0;
+    background: transparent;
+    border-radius: 12px;
+    padding: 10px 14px;
+    color: var(--text2);
+  }
+  .range-segment .btn.active {
+    background: rgba(255,255,255,0.11);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+  }
+  .custom-range-btn.active {
+    background: rgba(26,28,29,0.08);
+    color: var(--accent);
+    border-color: rgba(26,28,29,0.12);
+  }
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chip-btn {
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.58);
+    color: var(--text2);
+    border-radius: 999px;
+    padding: 9px 13px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.16s ease;
+  }
+  .chip-btn:hover {
+    background: rgba(26,28,29,0.04);
+    color: var(--text);
+  }
+  .chip-btn.active {
+    background: linear-gradient(90deg, rgba(59,59,59,0.10), rgba(94,94,94,0.04));
+    color: var(--accent);
+    border-color: rgba(26,28,29,0.12);
+  }
+  .bento-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: 128px 128px 120px;
+    grid-template-areas:
+      "hero hero hero hero signal signal signal signal signal scheduled scheduled scheduled"
+      "hero hero hero hero signal signal signal signal signal idle idle idle"
+      "hero hero hero hero schedule schedule schedule schedule order order order order";
+    gap: 14px;
+    margin-bottom: 18px;
+    align-items: stretch;
+  }
+  .summary-kpi,
+  .machine-table {
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(26,28,29,0.08);
+    box-shadow: 0 16px 36px rgba(26,28,29,0.08);
+  }
+  .summary-kpi .label {
+    font-size: 13px;
+    color: var(--text3);
+    margin-bottom: 1px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+  .summary-kpi .sub {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--text3);
+  }
+  .kpi-stack {
+    display: grid;
+    gap: 8px;
+  }
+  .summary-kpi {
+    border-radius: 24px;
+    padding: 20px;
+    min-height: 94px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+    overflow: hidden;
+  }
+  .summary-kpi .value {
+    font-size: 42px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    margin-top: 0;
+  }
+  .summary-kpi.hero {
+    grid-area: hero;
+    min-height: 0;
+    justify-content: space-between;
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.9));
+  }
+  .summary-kpi.signal {
+    grid-row: auto;
+    min-height: 0;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+  .summary-kpi.scheduled,
+  .summary-kpi.idle {
+    grid-row: auto;
+    min-height: 0;
+    justify-content: center;
+    gap: 0;
+    position: relative;
+  }
+  .summary-kpi.signal { grid-area: signal; }
+  .summary-kpi.scheduled { grid-area: scheduled; }
+  .summary-kpi.idle { grid-area: idle; }
+  .summary-kpi.schedule { grid-area: schedule; }
+  .summary-kpi.order { grid-area: order; }
+  .summary-kpi.hero .kpi-stack {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+  }
+  .summary-kpi.hero .kpi-value-block {
+    display: grid;
+    gap: 4px;
+  }
+  .summary-kpi.hero .kpi-meta-row {
+    margin-top: auto;
+    gap: 4px;
+  }
+  .summary-kpi.hero .label {
+    font-size: 13px;
+  }
+  .summary-kpi.hero .value {
+    font-size: 76px;
+  }
+  .summary-kpi.hero .kpi-meta-line:first-child {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .summary-kpi.hero .kpi-meta-line:last-child {
+    font-size: 42px;
+    font-weight: 900;
+    letter-spacing: -0.05em;
+    color: var(--text);
+    line-height: 1.05;
+  }
+  .summary-kpi.hero .kpi-meta-row {
+    margin-top: auto;
+    gap: 2px;
+  }
+  .summary-kpi.hero .kpi-meta-row .kpi-meta-line:last-child {
+    font-size: 44px;
+    line-height: 0.98;
+  }
+  .summary-kpi.signal .value {
+    margin-top: 0;
+    font-size: 64px;
+  }
+  .summary-kpi.signal .label {
+    margin-bottom: 2px;
+  }
+  .donut-wrap {
+    display: grid;
+    place-items: center;
+    flex: 1;
+    min-height: 0;
+  }
+  .donut {
+    --pct: 0%;
+    width: 172px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) 0 var(--pct), rgba(26,28,29,0.08) var(--pct) 100%);
+    display: grid;
+    place-items: center;
+    box-shadow: inset 0 0 0 1px rgba(26,28,29,0.04);
+  }
+  .donut-inner {
+    width: 118px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.96);
+    display: grid;
+    place-items: center;
+    text-align: center;
+    box-shadow: 0 8px 18px rgba(26,28,29,0.05);
+  }
+  .donut-value {
+    font-size: 36px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 1;
+  }
+  .donut-sub {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text3);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .summary-kpi.scheduled .value,
+  .summary-kpi.idle .value {
+    margin-top: 0;
+    font-size: 38px;
+  }
+  .summary-kpi.scheduled .label,
+  .summary-kpi.idle .label {
+    position: absolute;
+    top: 18px;
+    left: 20px;
+    margin-bottom: 0;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+  }
+  .summary-kpi.schedule .value,
+  .summary-kpi.order .value {
+    margin-top: 0;
+    font-size: 32px;
+  }
+  .kpi-note {
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.5;
+    max-width: 34ch;
+  }
+  .kpi-meta-row {
+    display: grid;
+    gap: 4px;
+    margin-top: 2px;
+    justify-items: start;
+  }
+  .kpi-meta-line {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text2);
+    line-height: 1.35;
+  }
+  .kpi-mini {
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.42);
+    min-width: 124px;
+    min-height: 86px;
+  }
+  .kpi-mini .mini-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text3);
+    font-weight: 800;
+  }
+  .kpi-mini .mini-value {
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    margin-top: 4px;
+  }
+  .kpi-dual {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+    align-items: stretch;
+  }
+  .kpi-dual .kpi-mini {
+    min-height: 86px;
+  }
+  .kpi-dual .mini-value {
+    font-size: 34px;
+    line-height: 1;
+  }
+  .machine-table .util-bar {
+    height: 8px;
+    background: rgba(26,28,29,0.08);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .machine-table .util-fill {
+    height: 100%;
+    border-radius: 999px;
+  }
+  .machine-table .metric-value {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.1;
+  }
+  .machine-table {
+    border-radius: 28px;
+    overflow: hidden;
+    grid-column: 1 / -1;
+  }
+  .machine-table table thead th {
+    background: rgba(26,28,29,0.03);
+  }
+  .machine-table table tbody tr.machine-main-row:hover {
+    background: rgba(26,28,29,0.03);
+  }
+  .machine-table table tbody tr.machine-detail-row {
+    background: rgba(26,28,29,0.015);
+  }
+  .machine-table .low {
+    color: var(--red);
+    font-weight: 700;
+  }
+  .machine-table .warn {
+    color: var(--yellow);
+    font-weight: 700;
+  }
+  @media (max-width: 900px) {
+    .bento-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: auto;
+      grid-template-areas:
+        "hero hero"
+        "signal scheduled"
+        "signal idle"
+        "schedule order";
+    }
+    .summary-kpi.hero,
+    .summary-kpi.signal,
+    .summary-kpi.scheduled,
+    .summary-kpi.idle,
+    .summary-kpi.schedule,
+    .summary-kpi.order {
+      min-height: auto;
+    }
+    .summary-kpi.hero .value {
+      font-size: 68px;
+    }
+    .summary-kpi.signal .value {
+      font-size: 52px;
+    }
+    .summary-kpi.scheduled .value,
+    .summary-kpi.idle .value {
+      font-size: 32px;
+    }
+    .summary-kpi.schedule .value,
+    .summary-kpi.order .value {
+      font-size: 28px;
+    }
+  }
+  @media (max-width: 720px) {
+    .bento-grid {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+      grid-template-areas:
+        "hero"
+        "signal"
+        "scheduled"
+        "idle"
+        "schedule"
+        "order";
+    }
+    .kpi-dual {
+      grid-template-columns: 1fr;
+    }
+  }
+  .machine-table .ok {
+    color: var(--green);
+    font-weight: 700;
+  }
+  .machine-toggle {
+    cursor: pointer;
+    user-select: none;
+  }
+  .machine-detail-row td {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .machine-detail-panel {
+    margin: 0 0 10px 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(255,255,255,0.5);
+    overflow: hidden;
+  }
+  .machine-detail-panel table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .machine-detail-panel th,
+  .machine-detail-panel td {
+    padding: 8px 10px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .machine-detail-panel th {
+    color: var(--text3);
+    text-align: left;
+    background: rgba(26,28,29,0.03);
+  }
+  .custom-range-grid {
+    display: grid;
+    gap: 14px;
+  }
+  .range-picker-shell {
+    display: grid;
+    gap: 12px;
+  }
+  .range-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .range-picker-kicker {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text3);
+    font-weight: 800;
+    margin-bottom: 6px;
+  }
+  .range-picker-month {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+  }
+  .range-picker-nav {
+    display: flex;
+    gap: 8px;
+  }
+  .range-picker-nav .btn {
+    min-width: 38px;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+  .range-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .range-picker-weekday {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text3);
+    font-weight: 800;
+    padding: 4px 6px 8px;
+  }
+  .range-picker-day {
+    min-height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.62);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 6px 7px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+  }
+  .range-picker-day:hover {
+    border-color: rgba(26,28,29,0.14);
+    background: rgba(26,28,29,0.03);
+  }
+  .range-picker-day.is-outside {
+    opacity: 0.35;
+  }
+  .range-picker-day.is-selected {
+    background: linear-gradient(135deg, rgba(59,59,59,0.12), rgba(94,94,94,0.06));
+    border-color: rgba(26,28,29,0.18);
+  }
+  .range-picker-day.is-start,
+  .range-picker-day.is-end {
+    background: rgba(59,59,59,0.18);
+    color: #111;
+    border-color: rgba(26,28,29,0.24);
+  }
+  .range-picker-day.is-between {
+    background: rgba(26,28,29,0.05);
+  }
+  .range-picker-day .day-num {
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+  }
+  .range-picker-day .day-mini {
+    font-size: 9px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .range-picker-day.is-start .day-mini,
+  .range-picker-day.is-end .day-mini,
+  .range-picker-day.is-start .day-num,
+  .range-picker-day.is-end .day-num {
+    color: #111;
+  }
+  .custom-range-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .custom-range-actions {
+    margin-top: 2px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .custom-range-summary-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .custom-range-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.7);
+    color: var(--text2);
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .custom-range-pill strong {
+    color: var(--text);
+  }
+  .summary-title-line { display: block; }
+  .modal-box.custom-range-modal {
+    max-width: 760px;
+  }
+  .modal-box.custom-range-modal .modal-body {
+    padding: 16px 18px 18px;
+  }
+</style>
+
+<div class="summary-shell">
+  <div class="summary-page">
+    <div id="summary-wrap">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const summaryState = { from: null, to: null, range: 'week', machineType: 'all' };
+const customRangeState = { viewMonth: null, start: null, end: null };
+
+function isoDate(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function setDateInputs(from, to) {
+  summaryState.from = from;
+  summaryState.to = to;
+}
+
+function setActivePresetButton(kind) {
+  document.querySelectorAll('#range-mode .btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-range') === kind);
+  });
+}
+
+function setCustomRangeActive(active) {
+  const btn = document.getElementById('custom-range-btn');
+  if (!btn) return;
+  btn.classList.toggle('active', !!active);
+}
+
+function parseISODate(value) {
+  return value ? new Date(`${value}T00:00:00`) : null;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function compareDates(a, b) {
+  return (a?.getTime?.() || 0) - (b?.getTime?.() || 0);
+}
+
+function monthLabel(date) {
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function weekdayLabel(date) {
+  return date.toLocaleDateString('en-US', { weekday: 'short' });
+}
+
+function prettyDate(value) {
+  const date = parseISODate(value);
+  if (!date) return '—';
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function setCustomSelection(start, end) {
+  customRangeState.start = start;
+  customRangeState.end = end;
+}
+
+function selectedRangeText() {
+  if (!customRangeState.start) return 'Click a start date, then click an end date.';
+  if (!customRangeState.end) return `Start ${prettyDate(customRangeState.start)} • click an end date.`;
+  const start = parseISODate(customRangeState.start);
+  const end = parseISODate(customRangeState.end);
+  const ordered = compareDates(start, end) <= 0 ? [customRangeState.start, customRangeState.end] : [customRangeState.end, customRangeState.start];
+  return `Start ${prettyDate(ordered[0])} • End ${prettyDate(ordered[1])}`;
+}
+
+function renderCustomRangePicker() {
+  const root = document.getElementById('custom-range-picker-root');
+  if (!root || !customRangeState.viewMonth) return;
+  const month = customRangeState.viewMonth;
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const firstDayIndex = first.getDay();
+  const gridStart = addDays(first, -firstDayIndex);
+  const days = [];
+  for (let i = 0; i < 42; i++) days.push(addDays(gridStart, i));
+  const rangeStart = customRangeState.start ? parseISODate(customRangeState.start) : null;
+  const rangeEnd = customRangeState.end ? parseISODate(customRangeState.end) : null;
+  const lo = rangeStart && rangeEnd && compareDates(rangeStart, rangeEnd) <= 0 ? rangeStart : rangeEnd;
+  const hi = rangeStart && rangeEnd && compareDates(rangeStart, rangeEnd) <= 0 ? rangeEnd : rangeStart;
+  const summary = document.getElementById('custom-range-summary');
+  if (summary) summary.textContent = selectedRangeText();
+  root.innerHTML = `
+    <div class="range-picker-shell">
+      <div class="range-picker-header">
+        <div>
+          <div class="range-picker-kicker">Click the start, then click the end</div>
+          <div class="range-picker-month" id="range-picker-month-label">${escapeHtml(monthLabel(month))}</div>
+        </div>
+        <div class="range-picker-nav">
+          <button class="btn btn-ghost" type="button" id="range-prev-month">Prev</button>
+          <button class="btn btn-ghost" type="button" id="range-next-month">Next</button>
+        </div>
+      </div>
+      <div class="custom-range-summary-bar">
+        <div class="custom-range-pill">Start <strong>${escapeHtml(prettyDate(customRangeState.start))}</strong></div>
+        <div class="custom-range-pill">End <strong>${escapeHtml(prettyDate(customRangeState.end))}</strong></div>
+      </div>
+      <div class="range-picker-grid">
+        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day => `<div class="range-picker-weekday">${day}</div>`).join('')}
+        ${days.map(day => {
+          const dayISO = isoDate(day);
+          const outside = day.getMonth() !== month.getMonth();
+          const isStart = customRangeState.start === dayISO;
+          const isEnd = customRangeState.end === dayISO;
+          const inBetween = lo && hi && compareDates(day, lo) >= 0 && compareDates(day, hi) <= 0;
+          const classes = ['range-picker-day'];
+          if (outside) classes.push('is-outside');
+          if (inBetween) classes.push('is-selected');
+          if (isStart) classes.push('is-start');
+          if (isEnd) classes.push('is-end');
+          if (inBetween && !isStart && !isEnd) classes.push('is-between');
+          return `
+            <button type="button" class="${classes.join(' ')}" data-date="${dayISO}">
+              <span class="day-num">${day.getDate()}</span>
+              <span class="day-mini">${weekdayLabel(day)}</span>
+            </button>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  document.getElementById('range-prev-month')?.addEventListener('click', () => {
+    customRangeState.viewMonth = new Date(customRangeState.viewMonth.getFullYear(), customRangeState.viewMonth.getMonth() - 1, 1);
+    renderCustomRangePicker();
+  });
+  document.getElementById('range-next-month')?.addEventListener('click', () => {
+    customRangeState.viewMonth = new Date(customRangeState.viewMonth.getFullYear(), customRangeState.viewMonth.getMonth() + 1, 1);
+    renderCustomRangePicker();
+  });
+  root.querySelectorAll('.range-picker-day').forEach(button => {
+    const date = button.getAttribute('data-date');
+    button.addEventListener('click', () => {
+      if (!customRangeState.start || (customRangeState.start && customRangeState.end)) {
+        setCustomSelection(date, null);
+      } else {
+        const clicked = parseISODate(date);
+        const start = parseISODate(customRangeState.start);
+        if (compareDates(clicked, start) < 0) {
+          setCustomSelection(date, customRangeState.start);
+        } else {
+          setCustomSelection(customRangeState.start, date);
+        }
+      }
+      renderCustomRangePicker();
+    });
+  });
+}
+
+function setMachineType(kind) {
+  summaryState.machineType = kind || 'all';
+  refreshSummary();
+}
+
+function setPreset(kind) {
+  const today = new Date();
+  let from = isoDate(today);
+  let to = isoDate(today);
+  if (kind === 'week') {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 6);
+    from = isoDate(start);
+  } else if (kind === 'month') {
+    from = isoDate(new Date(today.getFullYear(), today.getMonth(), 1));
+  } else if (kind === '30') {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 29);
+    from = isoDate(start);
+  }
+  summaryState.range = kind;
+  setCustomRangeActive(false);
+  setDateInputs(from, to);
+  setActivePresetButton(kind);
+  refreshSummary();
+}
+
+function changeRangeMode(kind) {
+  setPreset(kind);
+}
+
+function openCustomRangeModal() {
+  customRangeState.viewMonth = parseISODate(summaryState.from || summaryState.to || isoDate(new Date())) || new Date();
+  customRangeState.start = summaryState.from || isoDate(new Date());
+  customRangeState.end = summaryState.to || summaryState.from || isoDate(new Date());
+  openModal('Custom Date Range', `
+    <div class="custom-range-grid">
+      <div id="custom-range-picker-root"></div>
+      <div class="summary-filter-hint" id="custom-range-summary"></div>
+    </div>
+    <div class="custom-range-actions">
+      <button class="btn btn-ghost" type="button" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" type="button" id="apply-custom-range-btn">Apply Range</button>
+    </div>
+  `, 'modal-lg custom-range-modal');
+  setTimeout(() => renderCustomRangePicker(), 0);
+  setTimeout(() => {
+    const btn = document.getElementById('apply-custom-range-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const from = customRangeState.start;
+      const to = customRangeState.end;
+      if (!from || !to) return;
+      summaryState.range = 'custom';
+      const start = compareDates(parseISODate(from), parseISODate(to)) <= 0 ? from : to;
+      const end = compareDates(parseISODate(from), parseISODate(to)) <= 0 ? to : from;
+      setDateInputs(start, end);
+      setCustomRangeActive(true);
+      setActivePresetButton('');
+      closeModal();
+      refreshSummary();
+    }, { once: true });
+  }, 0);
+}
+
+async function loadSummary() {
+  const params = new URLSearchParams(location.search);
+  const today = new Date();
+  const defaultTo = isoDate(today);
+  const defaultFrom = isoDate(new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000));
+  const from = params.get('from') || defaultFrom;
+  const to = params.get('to') || defaultTo;
+  setDateInputs(from, to);
+  summaryState.range = params.get('range') || 'week';
+  summaryState.machineType = params.get('category') || 'all';
+  setActivePresetButton(summaryState.range);
+  setCustomRangeActive(summaryState.range === 'custom');
+  await refreshSummary(false);
+}
+
+async function refreshSummary(updateUrl = true) {
+  const from = summaryState.from;
+  const to = summaryState.to;
+  if (!from || !to) return;
+  if (updateUrl) {
+    const qs = new URLSearchParams({ from, to, range: summaryState.range });
+    if (summaryState.machineType && summaryState.machineType !== 'all') qs.set('category', summaryState.machineType);
+    history.replaceState(null, '', `/summary?${qs.toString()}`);
+  }
+  const params = new URLSearchParams({ view: 'machines', from, to });
+  if (summaryState.machineType && summaryState.machineType !== 'all') params.set('category', summaryState.machineType);
+  const data = await GET(`/api/trial/summary?${params.toString()}`);
+  render(data, from, to);
+}
+
+function machineFocus(row) {
+  if ((row.utilization_pct || 0) >= 85) return { text: 'Near cap', cls: 'warn' };
+  if ((row.utilization_pct || 0) < 35) return { text: 'Underused', cls: 'low' };
+  if ((row.idle_hours || 0) > (row.planned_hours || 0) * 0.3) return { text: 'Idle heavy', cls: 'warn' };
+  if ((row.order_completion_pct || 0) < 90) return { text: 'Behind target', cls: 'warn' };
+  return { text: 'Healthy', cls: 'ok' };
+}
+
+function barColor(value) {
+  if (value >= 90) return 'var(--green)';
+  if (value >= 70) return 'var(--accent)';
+  return 'var(--red)';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function populateMachineTypeFilter(data) {
+  const wrap = document.getElementById('machine-type-chips');
+  if (!wrap) return;
+  const current = summaryState.machineType || 'all';
+  const rows = Array.isArray(data) ? data : (data && Array.isArray(data.rows) ? data.rows : []);
+  const types = Array.isArray(data && data.machine_types) && data.machine_types.length
+    ? [...new Set(data.machine_types.map(type => String(type || '').trim()).filter(Boolean))].sort()
+    : [...new Set(rows.map(row => String(row.machine_category || '').trim()).filter(Boolean))].sort();
+  const buttons = [{ value: 'all', label: 'All Types' }].concat(types.map(type => ({ value: type, label: type })));
+  wrap.innerHTML = buttons.map(item => `
+    <button type="button" class="chip-btn ${item.value === current ? 'active' : ''}" data-type="${escapeHtml(item.value)}" onclick="setMachineType(this.dataset.type)">${escapeHtml(item.label)}</button>
+  `).join('');
+  summaryState.machineType = buttons.some(item => item.value === current) ? current : 'all';
+  const hint = document.getElementById('machine-type-hint');
+  if (hint) {
+    hint.textContent = current === 'all'
+      ? `${types.length || rows.length || 0} machine types available.`
+      : `Filtered to ${current}. Tap All Types to reset.`;
+  }
+}
+
+function render(data, from, to) {
+  const wrap = document.getElementById('summary-wrap');
+  const rows = Array.isArray(data) ? data : (data && Array.isArray(data.rows) ? data.rows : []);
+  const totals = !Array.isArray(data) && data && data.totals ? data.totals : null;
+  populateMachineTypeFilter(data);
+  const totalMachines = totals?.machine_count ?? rows.length;
+  const avgUtil = totals?.utilization_pct ?? (totalMachines ? rows.reduce((sum, row) => sum + (row.utilization_pct || 0), 0) / totalMachines : 0);
+  const totalScheduled = totals?.total_planned_hours ?? rows.reduce((sum, row) => sum + (row.planned_hours || 0), 0);
+  const totalIdle = totals?.idle_hours ?? rows.reduce((sum, row) => sum + (row.idle_hours || 0), 0);
+  const avgScheduleCompletion = totals?.schedule_completion_pct ?? (totalMachines ? rows.reduce((sum, row) => sum + (row.schedule_completion_pct || row.completion_pct || 0), 0) / totalMachines : 0);
+  const avgOrderCompletion = totals?.order_completion_pct ?? (totalMachines ? rows.reduce((sum, row) => sum + (row.order_completion_pct || 0), 0) / totalMachines : 0);
+  const topLoaded = totals?.best_machine || rows[0] || null;
+  const rangeHint = document.getElementById('range-hint');
+  if (rangeHint) rangeHint.textContent = `${from} → ${to}`;
+  const statsHtml = `
+    <section class="bento-grid">
+      <div class="card summary-kpi hero">
+        <div class="kpi-stack">
+          <div class="kpi-value-block">
+            <div class="label">Fleet Size</div>
+            <div class="value">${fmt(totalMachines)}</div>
+            <div class="kpi-note">Active machines in the selected window.</div>
+          </div>
+        </div>
+        <div class="kpi-meta-row">
+          <div class="kpi-meta-line">Most Loaded</div>
+          <div class="kpi-meta-line">${topLoaded ? escapeHtml(topLoaded.machine_code) : '-'}</div>
+        </div>
+      </div>
+      <div class="card summary-kpi signal" style="--pct:${avgUtil.toFixed(1)}%">
+        <div class="label">Avg Utilization</div>
+        <div class="donut-wrap">
+          <div class="donut" style="--pct:${avgUtil.toFixed(1)}%">
+            <div class="donut-inner">
+              <div>
+                <div class="donut-value">${avgUtil.toFixed(1)}%</div>
+                <div class="donut-sub">Avg util</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card summary-kpi scheduled">
+        <div class="label">Scheduled Hours</div>
+        <div class="value">${totalScheduled.toFixed(1)}</div>
+      </div>
+      <div class="card summary-kpi idle">
+        <div class="label">Idle Hours</div>
+        <div class="value">${totalIdle.toFixed(1)}</div>
+      </div>
+      <div class="card summary-kpi schedule">
+        <div class="label">Schedule Completion</div>
+        <div class="value">${avgScheduleCompletion.toFixed(1)}%</div>
+        <div class="kpi-note">Planned output completed.</div>
+      </div>
+      <div class="card summary-kpi order">
+        <div class="label">Order Completion</div>
+        <div class="value">${avgOrderCompletion.toFixed(1)}%</div>
+        <div class="kpi-note">Original order output completed.</div>
+      </div>
+    </section>`;
+
+  if (!rows.length) {
+    wrap.innerHTML = statsHtml + '<div class="empty-state"><div class="icon">M</div><p>No machine data for this range</p></div>';
+    return;
+  }
+
+  const tableHtml = `<div class="table-wrap machine-table">
+    <table>
+    <thead><tr>
+      <th>Machine</th><th>Category</th><th>Shift</th><th>PS Count</th>
+      <th>Scheduled Hrs</th><th>Available Hrs</th><th>Utilization</th><th>Idle Hrs</th>
+      <th>Schedule Completion</th><th>Order Completion</th><th>Next Available</th><th>Focus</th>
+    </tr></thead>
+    <tbody>${rows.map(row => {
+      const focus = machineFocus(row);
+      const util = Math.max(0, Math.min(100, row.utilization_pct || 0));
+      const utilClass = util >= 85 ? 'warn' : util >= 50 ? 'ok' : 'low';
+      const scheduleCompletion = Math.max(0, row.schedule_completion_pct || row.completion_pct || 0);
+      const orderCompletion = Math.max(0, row.order_completion_pct || 0);
+      const detailId = `machine-details-${String(row.machine_code || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const detailRows = (row.details || []).map(item => {
+        const ds = Math.max(0, item.schedule_completion_pct || 0);
+        const doq = Math.max(0, item.order_completion_pct || 0);
+        const opLabel = `${item.source_op_no || ''} ${item.operation_name || ''}`.trim() || '–';
+        const psLabel = item.display_ps_id || item.sheet_id || '—';
+        const partialLabel = item.display_partial_no ? `Partial ${item.display_partial_no}` : 'Partial —';
+        return `<tr>
+          <td><strong>${escapeHtml(psLabel)}</strong><div style="font-size:11px;color:var(--text3)">${escapeHtml(partialLabel)}</div></td>
+          <td>${escapeHtml(opLabel)}</td>
+          <td>${escapeHtml(item.start_datetime || item.start_time || '—')}</td>
+          <td>${escapeHtml(item.end_datetime || item.end_time || '—')}</td>
+          <td style="text-align:right">${fmt(item.total_qty || 0)}</td>
+          <td style="text-align:right">${fmt(item.planned_qty || 0)}</td>
+          <td style="text-align:right">${fmt(item.actual_qty_out || 0)}</td>
+        <td>
+          <div class="metric-value ${ds >= 90 ? 'ok' : ds >= 70 ? 'warn' : 'low'}">${ds.toFixed(1)}%</div>
+          <div class="util-bar"><div class="util-fill" style="width:${Math.min(100, ds)}%;background:${barColor(ds)}"></div></div>
+        </td>
+        <td>
+            <div class="metric-value ${doq >= 90 ? 'ok' : doq >= 70 ? 'warn' : 'low'}">${doq.toFixed(1)}%</div>
+            <div class="util-bar"><div class="util-fill" style="width:${Math.min(100, doq)}%;background:${barColor(doq)}"></div></div>
+        </td>
+        </tr>`;
+      }).join('');
+      return `<tr class="machine-main-row">
+        <td class="machine-toggle" onclick="toggleMachineDetail('${detailId}')"><strong>${row.machine_code || '-'}</strong> <span style="color:var(--text3);font-size:11px">▼</span></td>
+        <td>${row.machine_category || '-'}</td>
+        <td>${row.shift_profile || '-'}</td>
+        <td style="text-align:right">${fmt(row.ps_count || 0)}</td>
+        <td style="text-align:right">${(row.planned_hours || 0).toFixed(1)}</td>
+        <td style="text-align:right">${(row.available_hours || 0).toFixed(1)}</td>
+        <td>
+          <div class="${utilClass}">${util.toFixed(1)}%</div>
+          <div class="util-bar"><div class="util-fill" style="width:${util}%;background:${util >= 85 ? 'var(--yellow)' : util >= 50 ? 'var(--accent)' : 'var(--red)'}"></div></div>
+        </td>
+        <td style="text-align:right">${(row.idle_hours || 0).toFixed(1)}</td>
+        <td>
+          <div class="metric-value ${scheduleCompletion >= 90 ? 'ok' : scheduleCompletion >= 70 ? 'warn' : 'low'}">${scheduleCompletion.toFixed(1)}%</div>
+          <div class="util-bar"><div class="util-fill" style="width:${Math.min(100, scheduleCompletion)}%;background:${barColor(scheduleCompletion)}"></div></div>
+        </td>
+        <td>
+          <div class="metric-value ${orderCompletion >= 90 ? 'ok' : orderCompletion >= 70 ? 'warn' : 'low'}">${orderCompletion.toFixed(1)}%</div>
+          <div class="util-bar"><div class="util-fill" style="width:${Math.min(100, orderCompletion)}%;background:${barColor(orderCompletion)}"></div></div>
+        </td>
+        <td style="font-size:12px">${row.next_available || '—'}</td>
+        <td><span class="${focus.cls}">${focus.text}</span></td>
+      </tr>
+      <tr class="machine-detail-row" id="${detailId}" style="display:none">
+        <td colspan="12">
+          <div class="machine-detail-panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>PS / Sheet</th><th>Op</th><th>Start Time</th><th>End Time</th><th>Total Qty</th><th>Planned Qty</th><th>Actual Qty Out</th><th>Schedule Completion</th><th>Order Completion</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${detailRows || '<tr><td colspan="9" style="color:var(--text3);padding:10px">No PS/op rows in range</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+    </table></div>`;
+
+  wrap.innerHTML = statsHtml + tableHtml;
+}
+
+function toggleMachineDetail(id) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+loadSummary();
+</script>
+{% endblock %}

@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Data Management{% endblock %}
+{% block page_title %}
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Data</span>
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Management.</span>
+{% endblock %}
+{% block page_actions %}
+<div class="trial-toolbar">
+  <button class="btn btn-ghost btn-sm" onclick="location.reload()">Refresh</button>
+</div>
+{% endblock %}
+{% block content %}
+<style>
+  .dm-shell {
+    display: grid;
+    gap: 16px;
+  }
+  .dm-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .dm-card {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    background: rgba(255,255,255,0.86);
+    box-shadow: var(--shadow-lg);
+    min-width: 0;
+  }
+  .dm-title {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+  }
+  .dm-note {
+    color: var(--text3);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .dm-input {
+    width: 100%;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 12px;
+  }
+  .dm-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .dm-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .dm-stat {
+    padding: 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(26,28,29,0.08);
+    background: rgba(255,255,255,0.9);
+    min-width: 0;
+  }
+  .dm-stat-label {
+    font-size: 11px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+  }
+  .dm-stat-value {
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    margin-top: 4px;
+  }
+  .dm-log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .dm-log-table th,
+  .dm-log-table td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid rgba(26,28,29,0.08);
+    vertical-align: top;
+  }
+  .dm-log-table th {
+    font-size: 11px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .dm-log-status {
+    font-weight: 800;
+  }
+  @media (max-width: 1100px) {
+    .dm-grid, .dm-summary {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  @media (max-width: 720px) {
+    .dm-grid, .dm-summary {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="dm-shell">
+  <div class="dm-summary">
+    <div class="dm-stat"><div class="dm-stat-label">Total PS</div><div class="dm-stat-value">{{ stats.total_ps }}</div></div>
+    <div class="dm-stat"><div class="dm-stat-label">Unplanned PS</div><div class="dm-stat-value">{{ stats.unplanned_ps }}</div></div>
+    <div class="dm-stat"><div class="dm-stat-label">Completed PS</div><div class="dm-stat-value">{{ stats.completed_ps }}</div></div>
+    <div class="dm-stat"><div class="dm-stat-label">Active PS</div><div class="dm-stat-value">{{ stats.active_ps }}</div></div>
+  </div>
+
+  <div class="dm-grid">
+    <div class="dm-card">
+      <div class="dm-title">Workbook Upload</div>
+      <div class="dm-note">
+        Upload the full workbook first. The importer ignores source statuses and sets every PS and every operation to unplanned.
+      </div>
+      <input class="dm-input" id="dm-workbook-file" type="file" accept=".xlsx,.xlsm,.xltx,.xltm">
+      <div class="dm-actions">
+        <button class="btn btn-primary btn-sm" type="button" onclick="uploadDataManagementFile('workbook')">Upload Workbook</button>
+        <span class="dm-note" id="dm-workbook-status"></span>
+      </div>
+    </div>
+
+    <div class="dm-card">
+      <div class="dm-title">Active Sheet Upload</div>
+      <div class="dm-note">
+        Upload the active sheet after the first import. Anything not listed here gets marked completed. Already completed sheets stay frozen.
+      </div>
+      <input class="dm-input" id="dm-active-file" type="file" accept=".xlsx,.xlsm,.xltx,.xltm">
+      <div class="dm-actions">
+        <button class="btn btn-primary btn-sm" type="button" onclick="uploadDataManagementFile('active')">Upload Active Sheet</button>
+        <span class="dm-note" id="dm-active-status"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="dm-card">
+    <div class="dm-title">Import Log</div>
+    <table class="dm-log-table">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Workbook</th>
+          <th>Active Sheet</th>
+          <th>Status</th>
+          <th>Message</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in stats.logs %}
+        <tr>
+          <td>{{ log.import_type }}</td>
+          <td>{{ log.workbook_name or '—' }}</td>
+          <td>{{ log.active_sheet_name or '—' }}</td>
+          <td class="dm-log-status">{{ log.status }}</td>
+          <td style="white-space:pre-wrap;word-break:break-word">{{ log.message or '—' }}</td>
+          <td>{{ log.created_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="color:var(--text3);padding:18px 8px">No imports yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function uploadDataManagementFile(mode) {
+  const inputId = mode === 'active' ? 'dm-active-file' : 'dm-workbook-file';
+  const statusId = mode === 'active' ? 'dm-active-status' : 'dm-workbook-status';
+  const endpoint = mode === 'active' ? '/api/data-management/upload-active-sheet' : '/api/data-management/upload-workbook';
+  const input = document.getElementById(inputId);
+  const statusEl = document.getElementById(statusId);
+  const file = input && input.files && input.files[0];
+  if (!file) {
+    toast('Choose a workbook first', 'error');
+    return;
+  }
+  const form = new FormData();
+  form.append('file', file);
+  if (statusEl) statusEl.textContent = 'Uploading...';
+  try {
+    const res = await fetch(endpoint, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (statusEl) statusEl.textContent = 'Done';
+    toast(mode === 'active' ? `Marked ${data.completed || 0} PS completed` : 'Workbook imported', 'success');
+    setTimeout(() => window.location.reload(), 500);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Failed';
+    toast((mode === 'active' ? 'Active sheet import failed: ' : 'Workbook import failed: ') + e.message, 'error');
+  }
+}
+</script>
+{% endblock %}
