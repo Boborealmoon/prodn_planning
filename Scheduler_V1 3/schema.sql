@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS data_import_log (
 );
 
 CREATE TABLE IF NOT EXISTS machines (
-  machine_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  machine_id INTEGER PRIMARY KEY AUTOINCREMENT, -- to be removed and replace the and change the key to machine_code. Change cascading foreign keys.
   machine_code TEXT NOT NULL UNIQUE,
   machine_category TEXT NOT NULL,
   shift_profile TEXT NOT NULL DEFAULT 'STANDARD',
