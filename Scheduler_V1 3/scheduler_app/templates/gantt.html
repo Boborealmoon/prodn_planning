@@ -1,0 +1,1543 @@
+{% extends "base.html" %}
+{% block title %}Gantt{% endblock %}
+{% block page_title %}
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Production</span>
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Schedule.</span>
+{% endblock %}
+{% block page_actions %}
+<div class="gantt-actions">
+  <div class="gantt-filter-block">
+    <div class="gantt-filter-label">Range</div>
+    <div class="gantt-range-row">
+      <span id="gantt-loaded-range-label" class="gantt-date-chip"></span>
+      <label class="gantt-jump-field">
+        <span class="gantt-filter-hint">Jump to date</span>
+        <input id="gantt-jump-date" type="date" class="gantt-date-input">
+      </label>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="jumpToSelectedDate()">Jump</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="jumpToToday()">Today</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="reloadCurrentWindow()">Reload</button>
+      <div class="gantt-scale-toggle" role="group" aria-label="Gantt time scale">
+        <button type="button" class="gantt-scale-btn" data-mode="focus" onclick="setGanttTimeScaleMode('focus')">Focus Hours</button>
+        <button type="button" class="gantt-scale-btn" data-mode="true24" onclick="setGanttTimeScaleMode('true24')">True 24H</button>
+        <button type="button" class="gantt-scale-btn" data-mode="compact" onclick="setGanttTimeScaleMode('compact')">Compact AM/PM</button>
+      </div>
+      <span class="gantt-filter-hint" style="margin-left:4px">Gantt is view-only. Move blocks from Planner.</span>
+    </div>
+  </div>
+  <div class="gantt-filter-block">
+    <div class="gantt-filter-label">Machine Type</div>
+    <div id="gantt-machine-chips" class="chip-row"></div>
+    <div class="gantt-filter-hint">Tap a chip to focus the schedule on one machine type.</div>
+  </div>
+</div>
+{% endblock %}
+{% block content %}
+<style>
+  .gantt-actions { display: grid; gap: 14px; min-width: min(100%, 760px); }
+  .gantt-filter-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: rgba(255,255,255,0.56);
+    box-shadow: var(--shadow-sm);
+  }
+  .gantt-filter-label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text3);
+    font-weight: 800;
+  }
+  .gantt-range-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .gantt-chip-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    background: rgba(255,255,255,0.76);
+    border: 1px solid rgba(26,28,29,0.08);
+    border-radius: 18px;
+    box-shadow: 0 10px 22px rgba(26,28,29,0.05);
+  }
+  .gantt-date-chip, .gantt-select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 180px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.76);
+    border: 1px solid rgba(26,28,29,0.08);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.05);
+    font-size: 13px;
+    color: var(--text2);
+    font-weight: 700;
+  }
+  .gantt-select { min-width: 120px; appearance: none; }
+  .gantt-scale-toggle {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.76);
+    border: 1px solid rgba(26,28,29,0.08);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.05);
+  }
+  .gantt-scale-btn {
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--text2);
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .gantt-scale-btn.active {
+    background: rgba(59,59,59,0.10);
+    color: var(--text);
+  }
+  .gantt-jump-field {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .gantt-date-input {
+    min-width: 150px;
+    padding: 8px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(26,28,29,0.08);
+    background: rgba(255,255,255,0.8);
+    color: var(--text);
+    font-weight: 700;
+  }
+  .gantt-filter-hint { font-size: 11px; color: var(--text3); line-height: 1.4; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.72);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.04);
+    color: var(--text2);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .chip.active {
+    background: rgba(59,59,59,0.10);
+    color: var(--text);
+    border-color: rgba(26,28,29,0.12);
+  }
+  .gantt-page-shell { display: grid; gap: 14px; }
+  #gantt-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 0 2px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    margin-bottom: 2px;
+  }
+  #gantt-legend > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.72);
+    border: 1px solid rgba(26,28,29,0.06);
+    box-shadow: 0 10px 22px rgba(26,28,29,0.04);
+  }
+  #gantt-legend span span {
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 3px !important;
+  }
+  #gantt-container {
+    overflow: auto;
+    max-height: calc(100vh - 220px);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: var(--bg2);
+    width: 100%;
+    box-shadow: var(--shadow-lg);
+    scrollbar-gutter: stable both-edges;
+  }
+  #gantt-container > div:first-child {
+    position: sticky;
+    top: 0;
+    z-index: 25;
+    backdrop-filter: blur(18px);
+  }
+  #gantt-container .gantt-day-row > div { transition: background 0.16s ease, box-shadow 0.16s ease; }
+  #gantt-container .gantt-day-row:hover > div { background: rgba(255,255,255,0.35) !important; }
+  #gantt-container .gantt-block {
+    border-radius: 14px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.14) !important;
+    padding: 10px 12px !important;
+    font-size: 11px !important;
+    letter-spacing: -0.01em;
+    backdrop-filter: blur(12px);
+  }
+  #gantt-container .gantt-block:hover { transform: translateY(-1px); opacity: 0.98; z-index: 8; }
+  #gantt-container .gantt-block > div { line-height: 1.25; }
+  #gantt-container .gantt-bar-content {
+    position: relative;
+    z-index: 2;
+  }
+  #gantt-container .gantt-bar-content.compact-mode {
+    font-size: 9px;
+    line-height: 1.15;
+  }
+  #gantt-container .gantt-bar-content.compact-mode .gantt-block-secondary {
+    font-size: 8px !important;
+    opacity: 0.82 !important;
+  }
+  #gantt-container .gantt-bar-content.compact-mode .gantt-block-operation,
+  #gantt-container .gantt-bar-content.compact-mode .gantt-block-qty {
+    display: none;
+  }
+  #gantt-container .gantt-bar-content.compact-mode .gantt-block-time {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #gantt-container .gantt-offwork-band {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: rgba(100,116,139,0.14);
+    pointer-events: none;
+    z-index: 1;
+  }
+  #gantt-container .gantt-break-band {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: rgba(100,116,139,0.20);
+    border-top: 1px dashed rgba(100,116,139,0.28);
+    border-bottom: 1px dashed rgba(100,116,139,0.28);
+    pointer-events: none;
+    z-index: 2;
+  }
+  #gantt-container .gantt-setup-section {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: repeating-linear-gradient(
+      135deg,
+      rgba(100,116,139,0.34) 0,
+      rgba(100,116,139,0.34) 6px,
+      rgba(100,116,139,0.18) 6px,
+      rgba(100,116,139,0.18) 12px
+    );
+    border-right: 1px dashed rgba(15,23,42,0.35);
+    pointer-events: none;
+    z-index: 1;
+  }
+  #gantt-container .segment-setup { color: var(--text2) !important; background: rgba(100,116,139,0.35) !important; border-style: dashed !important; }
+  #gantt-container .segment-rework { background: rgba(239,68,68,0.82) !important; border-color: rgba(239,68,68,1) !important; }
+  #gantt-container .gantt-finish-cap {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: rgba(255,255,255,0.70);
+    z-index: 3;
+    pointer-events: none;
+  }
+  #gantt-container .gantt-finish-cap.gantt-finish-state-op,
+  #gantt-container .gantt-finish-cap.gantt-finish-state-ps {
+    height: 4px;
+    background: rgba(15,23,42,0.72);
+  }
+  #gantt-container .gantt-finish-state-text {
+    position: absolute;
+    left: 6px;
+    bottom: 5px;
+    z-index: 4;
+    max-width: calc(100% - 58px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255,255,255,0.92);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.24);
+    font-size: 9px;
+    pointer-events: none;
+  }
+  #gantt-container .gantt-finish-state-text.gantt-finish-state-op {
+    font-weight: 500;
+  }
+  #gantt-container .gantt-finish-state-text.gantt-finish-state-ps {
+    font-weight: 900;
+  }
+  #gantt-container .gantt-finish-badge {
+    position: absolute;
+    right: 5px;
+    bottom: 4px;
+    z-index: 5;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(15,23,42,0.72);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1.2;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.18);
+    pointer-events: none;
+  }
+  #gantt-container .gantt-setup-overlay,
+  #gantt-container .gantt-break-marker { border-radius: inherit; }
+  .gantt-scroll-content {
+    position: relative;
+  }
+  #gantt-connector-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 6;
+    overflow: visible;
+  }
+  .page-header { align-items: flex-end; }
+  .page-header-copy h1 { font-size: 32px; }
+  @media (max-width: 900px) {
+    .page-header { align-items: flex-start; }
+    .gantt-toolbar { justify-items: start; width: 100%; }
+    .gantt-toolbar-row { justify-content: flex-start; }
+  }
+</style>
+
+<div class="gantt-page-shell">
+  <div id="gantt-legend">
+    <span><span style="background:rgba(59,130,246,0.72);border:1px solid rgba(59,130,246,0.95);"></span> Planned production</span>
+    <span><span style="background:rgba(100,116,139,0.55);border:1px dashed rgba(100,116,139,0.9);"></span> Setup</span>
+    <span><span style="background:rgba(34,197,94,0.78);border:1px solid rgba(34,197,94,1);"></span> Actual reported</span>
+    <span><span style="background:rgba(16,185,129,0.88);border:1px solid rgba(16,185,129,1);"></span> Completed</span>
+    <span><span style="background:rgba(239,68,68,0.82);"></span> Rework</span>
+    <span><span style="background:rgba(100,116,139,0.15);border:1px solid var(--border);"></span> Off hours / non-working</span>
+    <span style="margin-left:auto;color:var(--text3);background:transparent;border:none;">Click block for details</span>
+  </div>
+  <div id="gantt-container">
+    <div class="loading"><div class="spinner"></div> Loading Gantt...</div>
+  </div>
+</div>
+
+<div id="block-detail" style="display:none;position:fixed;bottom:20px;right:20px;width:350px;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;z-index:200;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+  <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+    <strong id="bd-title">Segment Details</strong>
+    <button onclick="document.getElementById('block-detail').style.display='none'" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px">✕</button>
+  </div>
+  <div id="bd-body" style="padding:14px 16px;font-size:13px"></div>
+</div>
+
+<script>
+const DAY_START = 0;
+const DAY_END = 1440;
+const MINUTES_PER_DAY = 1440;
+const DEFAULT_TIME_SCALE_MODE = 'focus';
+const GANTT_INITIAL_DAYS_BEFORE = 14;
+const GANTT_INITIAL_DAYS_AFTER = 45;
+const GANTT_PREPEND_DAYS = 21;
+const GANTT_APPEND_DAYS = 35;
+const GANTT_SCROLL_LOAD_THRESHOLD = 360;
+const COMPACT_ROW_HEIGHT = 200;
+
+let fromDate = localISODate();
+let ganttSelectedMachineType = 'all';
+let ganttLastMachines = [];
+let ganttTrialDataCache = null;
+let ganttLoadedStart = '';
+let ganttLoadedEnd = '';
+let ganttLoadedDates = [];
+let ganttLoadedBlocksBySegmentId = {};
+let ganttLoadedMachines = [];
+let ganttLoadedCalendarByDate = {};
+let ganttIsLoadingMore = false;
+let ganttAnchorDate = localISODate();
+let ganttLoadToken = 0;
+let ganttScrollBindingInstalled = false;
+let ganttTimeScaleMode = ['focus', 'true24', 'compact'].includes(localStorage.getItem('ganttTimeScaleMode'))
+  ? localStorage.getItem('ganttTimeScaleMode')
+  : DEFAULT_TIME_SCALE_MODE;
+
+function localISODate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysToISODate(dateText, days) {
+  const d = new Date(String(dateText || localISODate()) + 'T00:00:00');
+  d.setDate(d.getDate() + Number(days || 0));
+  return localISODate(d);
+}
+
+function compareISODate(a, b) {
+  return String(a || '').localeCompare(String(b || ''));
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function parseDateTime(value) {
+  if (!value) return null;
+  const dt = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function HHMM(value) {
+  const dt = parseDateTime(value);
+  if (!dt) return '—';
+  const hours = String(dt.getHours()).padStart(2, '0');
+  const minutes = String(dt.getMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function minuteText(minute) {
+  const normalized = Math.max(0, Math.min(1440, Math.round(Number(minute || 0))));
+  if (normalized === 0) return '00:00';
+  if (normalized === 720) return '12:00';
+  if (normalized === 1440) return '24:00';
+  const hours = String(Math.floor(normalized / 60)).padStart(2, '0');
+  const minutes = String(normalized % 60).padStart(2, '0');
+  return `${hours}:${minutes}`;
+}
+
+function ganttDisplayStartMin(block) {
+  const value = Number(block && block.visual_start_min != null ? block.visual_start_min : block.start_min);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function ganttDisplayEndMin(block) {
+  const value = Number(block && block.visual_end_min != null ? block.visual_end_min : block.end_min);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function ganttDisplayStartDateTime(block) {
+  return block && block.visual_start_datetime || '';
+}
+
+function ganttDisplayEndDateTime(block) {
+  return block && block.visual_end_datetime || '';
+}
+
+function ganttDisplayTimeRange(block) {
+  return `${HHMM(ganttDisplayStartDateTime(block))} – ${HHMM(ganttDisplayEndDateTime(block))}`;
+}
+
+function getGanttTimeScale(mode) {
+  const normalizedMode = ['focus', 'true24', 'compact'].includes(mode) ? mode : DEFAULT_TIME_SCALE_MODE;
+  const focusMainStart = 510;
+  const focusMainEnd = 1200;
+  const focus = {
+    mode: 'focus',
+    rowHeight: 852,
+    minuteToY(minute) {
+      const m = Math.max(0, Math.min(1440, Number(minute || 0)));
+      if (m <= focusMainStart) {
+        return (m / focusMainStart) * 64;
+      }
+      if (m <= focusMainEnd) {
+        return 64 + ((m - focusMainStart) / (focusMainEnd - focusMainStart)) * 740;
+      }
+      return 804 + ((m - focusMainEnd) / (1440 - focusMainEnd)) * 48;
+    },
+    yToMinute(y) {
+      const value = Math.max(0, Math.min(852, Number(y || 0)));
+      if (value <= 64) {
+        return (value / 64) * focusMainStart;
+      }
+      if (value <= 804) {
+        return focusMainStart + ((value - 64) / 740) * (focusMainEnd - focusMainStart);
+      }
+      return focusMainEnd + ((value - 804) / 48) * (1440 - focusMainEnd);
+    },
+    ticks: [
+      { minute: 0, label: '00:00' },
+      { minute: 510, label: '08:30' },
+      { minute: 600, label: '10:00' },
+      { minute: 720, label: '12:00' },
+      { minute: 840, label: '14:00' },
+      { minute: 960, label: '16:00' },
+      { minute: 1080, label: '18:00' },
+      { minute: 1200, label: '20:00' },
+      { minute: 1440, label: '24:00' },
+    ],
+    offHourBands: [
+      { startMinute: 0, endMinute: 510, label: 'Off hours' },
+      { startMinute: 1200, endMinute: 1440, label: 'Off hours' },
+    ],
+    amPmBands: [],
+    label: 'Focus Hours',
+  };
+  const true24 = {
+    mode: 'true24',
+    rowHeight: 960,
+    minuteToY(minute) {
+      const m = Math.max(0, Math.min(1440, Number(minute || 0)));
+      return (m / 1440) * 960;
+    },
+    yToMinute(y) {
+      const value = Math.max(0, Math.min(960, Number(y || 0)));
+      return (value / 960) * 1440;
+    },
+    ticks: [
+      { minute: 0, label: '00:00' },
+      { minute: 120, label: '02:00' },
+      { minute: 240, label: '04:00' },
+      { minute: 360, label: '06:00' },
+      { minute: 480, label: '08:00' },
+      { minute: 600, label: '10:00' },
+      { minute: 720, label: '12:00' },
+      { minute: 840, label: '14:00' },
+      { minute: 960, label: '16:00' },
+      { minute: 1080, label: '18:00' },
+      { minute: 1200, label: '20:00' },
+      { minute: 1320, label: '22:00' },
+      { minute: 1440, label: '24:00' },
+    ],
+    offHourBands: [
+      { startMinute: 0, endMinute: 510, label: 'Off hours' },
+      { startMinute: 1200, endMinute: 1440, label: 'Off hours' },
+    ],
+    amPmBands: [],
+    label: 'True 24H',
+  };
+  const compact = {
+    mode: 'compact',
+    rowHeight: COMPACT_ROW_HEIGHT,
+    minuteToY(minute) {
+      const m = Math.max(0, Math.min(1440, Number(minute || 0)));
+      return (m / 1440) * COMPACT_ROW_HEIGHT;
+    },
+    yToMinute(y) {
+      const value = Math.max(0, Math.min(COMPACT_ROW_HEIGHT, Number(y || 0)));
+      return (value / COMPACT_ROW_HEIGHT) * 1440;
+    },
+    ticks: [
+      { minute: 0, label: 'Midnight' },
+      { minute: 720, label: 'Noon' },
+      { minute: 1440, label: 'Midnight' },
+    ],
+    offHourBands: [
+      { startMinute: 0, endMinute: 510, label: 'Off hours' },
+      { startMinute: 1200, endMinute: 1440, label: 'Off hours' },
+    ],
+    amPmBands: [
+      { startMinute: 0, endMinute: 720, label: 'AM' },
+      { startMinute: 720, endMinute: 1440, label: 'PM' },
+    ],
+    label: 'Compact AM/PM',
+  };
+  return normalizedMode === 'true24' ? true24 : (normalizedMode === 'compact' ? compact : focus);
+}
+
+function getCurrentGanttTimeScale() {
+  return getGanttTimeScale(ganttTimeScaleMode);
+}
+
+function setGanttTimeScaleMode(mode) {
+  const normalized = ['focus', 'true24', 'compact'].includes(mode) ? mode : DEFAULT_TIME_SCALE_MODE;
+  ganttTimeScaleMode = normalized;
+  localStorage.setItem('ganttTimeScaleMode', normalized);
+  syncGanttTimeScaleToggle();
+  if (ganttTrialDataCache) {
+    renderGantt(ganttTrialDataCache);
+  } else {
+    loadGanttWindowAroundDate(ganttAnchorDate);
+  }
+}
+
+function syncGanttTimeScaleToggle() {
+  document.querySelectorAll('.gantt-scale-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === ganttTimeScaleMode);
+  });
+}
+
+function updateGanttLoadedRangeLabel() {
+  const el = document.getElementById('gantt-loaded-range-label');
+  if (!el) return;
+  if (ganttLoadedStart && ganttLoadedEnd) {
+    el.textContent = `Loaded: ${ganttLoadedStart} → ${ganttLoadedEnd}`;
+  } else {
+    el.textContent = 'Loaded: —';
+  }
+}
+
+function updateGanttJumpInput(dateText) {
+  const input = document.getElementById('gantt-jump-date');
+  if (input && dateText) input.value = dateText;
+}
+
+function setGanttAnchorDate(dateText) {
+  if (dateText) ganttAnchorDate = String(dateText);
+  updateGanttJumpInput(ganttAnchorDate);
+}
+
+function buildGanttCalendarArray() {
+  return ganttLoadedDates.map(workDate => ganttLoadedCalendarByDate[workDate] || {
+    work_date: workDate,
+    is_working_day: 0,
+    capacity_minutes: 0,
+    profile_name: 'OFF',
+    note: '',
+  });
+}
+
+function rebuildGanttTrialDataCache() {
+  const blocks = Object.values(ganttLoadedBlocksBySegmentId);
+  blocks.sort((a, b) => (
+    String(a.plan_date || '').localeCompare(String(b.plan_date || ''))
+  ) || (
+    Number(a.machine_id || 0) - Number(b.machine_id || 0)
+  ) || (
+    Number(a.visual_start_min || a.start_min || 0) - Number(b.visual_start_min || b.start_min || 0)
+  ) || (
+    Number(a.block_id || 0) - Number(b.block_id || 0)
+  ) || (
+    Number(a.segment_id || 0) - Number(b.segment_id || 0)
+  ));
+  ganttLoadedDates = Array.from(new Set(ganttLoadedDates)).sort(compareISODate);
+  ganttLoadedMachines = Object.values(ganttLoadedMachines.reduce((acc, machine) => {
+    const machineId = String(machine.machine_id || '');
+    if (!machineId) return acc;
+    acc[machineId] = machine;
+    return acc;
+  }, {})).sort((a, b) => String(a.machine_code || '').localeCompare(String(b.machine_code || '')));
+  ganttTrialDataCache = {
+    from: ganttLoadedStart,
+    to: ganttLoadedEnd,
+    dates: ganttLoadedDates.slice(),
+    machines: ganttLoadedMachines.slice(),
+    calendar: buildGanttCalendarArray(),
+    blocks,
+  };
+  ganttTrialDataCache.display_blocks = buildGanttDisplayBlocks(ganttTrialDataCache.blocks);
+  ganttLastMachines = ganttTrialDataCache.machines.slice();
+  updateGanttLoadedRangeLabel();
+}
+
+function mergeGanttPayload(payload, { replace = false } = {}) {
+  const incomingDates = Array.isArray(payload?.dates) ? payload.dates.map(String).filter(Boolean) : [];
+  const incomingMachines = Array.isArray(payload?.machines) ? payload.machines : [];
+  const incomingCalendar = Array.isArray(payload?.calendar) ? payload.calendar : [];
+  const incomingBlocks = Array.isArray(payload?.blocks) ? payload.blocks : [];
+  if (replace) {
+    ganttLoadedDates = [];
+    ganttLoadedBlocksBySegmentId = {};
+    ganttLoadedMachines = [];
+    ganttLoadedCalendarByDate = {};
+    ganttLoadedStart = '';
+    ganttLoadedEnd = '';
+  }
+  incomingDates.forEach(workDate => {
+    if (workDate && !ganttLoadedDates.includes(workDate)) ganttLoadedDates.push(workDate);
+  });
+  incomingMachines.forEach(machine => {
+    const machineId = String(machine.machine_id || '');
+    if (!machineId) return;
+    const index = ganttLoadedMachines.findIndex(existing => String(existing.machine_id || '') === machineId);
+    if (index >= 0) {
+      ganttLoadedMachines[index] = { ...ganttLoadedMachines[index], ...machine };
+    } else {
+      ganttLoadedMachines.push({ ...machine });
+    }
+  });
+  incomingCalendar.forEach(item => {
+    const workDate = String(item.work_date || '').trim();
+    if (!workDate) return;
+    ganttLoadedCalendarByDate[workDate] = { ...(ganttLoadedCalendarByDate[workDate] || {}), ...item };
+  });
+  incomingBlocks.forEach(block => {
+    const segmentId = String(block.segment_id || '').trim();
+    const blockKey = segmentId || `${block.block_id || ''}|${block.machine_id || ''}|${block.plan_date || ''}|${block.source_op_seq_id || ''}`;
+    ganttLoadedBlocksBySegmentId[blockKey] = { ...(ganttLoadedBlocksBySegmentId[blockKey] || {}), ...block };
+  });
+  if (incomingDates.length) {
+    const minDate = incomingDates.reduce((minValue, workDate) => (!minValue || compareISODate(workDate, minValue) < 0 ? workDate : minValue), ganttLoadedStart || incomingDates[0]);
+    const maxDate = incomingDates.reduce((maxValue, workDate) => (!maxValue || compareISODate(workDate, maxValue) > 0 ? workDate : maxValue), ganttLoadedEnd || incomingDates[incomingDates.length - 1]);
+    ganttLoadedStart = ganttLoadedStart && !replace ? (compareISODate(ganttLoadedStart, minDate) < 0 ? ganttLoadedStart : minDate) : minDate;
+    ganttLoadedEnd = ganttLoadedEnd && !replace ? (compareISODate(ganttLoadedEnd, maxDate) > 0 ? ganttLoadedEnd : maxDate) : maxDate;
+  }
+  rebuildGanttTrialDataCache();
+}
+
+function is24HrProfile(profileName = '') {
+  const text = String(profileName || '').toUpperCase();
+  return text.includes('24HR') || text.includes('FULL_24H');
+}
+
+function isWeekendSunday(dateText) {
+  const d = new Date(`${String(dateText || localISODate())}T00:00:00`);
+  return d.getDay() === 0;
+}
+
+function isSaturday(dateText) {
+  const d = new Date(`${String(dateText || localISODate())}T00:00:00`);
+  return d.getDay() === 6;
+}
+
+function isWeekdayMonToFri(dateText) {
+  const d = new Date(`${String(dateText || localISODate())}T00:00:00`);
+  const day = d.getDay();
+  return day >= 1 && day <= 5;
+}
+
+function ganttOffWorkBandsForMachine(machine) {
+  if (!machine || is24HrProfile(machine.shift_profile)) return [];
+  return [
+    { kind: 'offwork', startMinute: 0, endMinute: 510 },
+    { kind: 'offwork', startMinute: 1200, endMinute: 1440 },
+  ];
+}
+
+function ganttBreakBandsForDateMachine(dateText, machine) {
+  if (!machine || is24HrProfile(machine.shift_profile) || isWeekendSunday(dateText)) return [];
+  const bands = [{ kind: 'break', startMinute: 720, endMinute: 765 }];
+  if (!isSaturday(dateText) && isWeekdayMonToFri(dateText)) {
+    bands.push({ kind: 'break', startMinute: 960, endMinute: 975 });
+  }
+  return bands;
+}
+
+function blockHasActual(block) {
+  return Number(block.actual_report_count || 0) > 0 || Number(block.output_qty || 0) > 0;
+}
+
+function isOperationFinished(block) {
+  return Boolean(block && block.op_finished);
+}
+
+function isProcessSheetFinished(block) {
+  return Boolean(block && block.ps_finished);
+}
+
+function finishStateLabel(block) {
+  if (block && block.ps_finished_marker) return 'PS finished';
+  if (block && block.op_finished_marker) return 'OP finished';
+  return '';
+}
+
+function finishStateClass(block) {
+  if (block && block.ps_finished_marker) return 'gantt-finish-state-ps';
+  if (block && block.op_finished_marker) return 'gantt-finish-state-op';
+  return '';
+}
+
+function ganttFinishTime(block) {
+  return HHMM(ganttDisplayEndDateTime(block));
+}
+
+function operationStatusLabel(block) {
+  if (isOperationFinished(block)) return 'Finished';
+  const status = String(block.execution_status || block.planning_status || block.status || '').toUpperCase();
+  if (status === 'COMPLETED' || status === 'DONE') return 'Finished';
+  if (status === 'IN_PROGRESS') return 'In progress';
+  if (status === 'PLANNED') return 'Planned';
+  if (status === 'PARTIALLY_PLANNED') return 'Partially planned';
+  if (status === 'NOT_STARTED') return 'Not started';
+  return status || '—';
+}
+
+function processSheetStatusLabel(block) {
+  if (isProcessSheetFinished(block)) return 'Finished';
+  const status = String(block.ps_status || block.ps_planner_status || '').toUpperCase();
+  if (status === 'COMPLETED') return 'Finished';
+  if (status === 'ACTIVE') return 'Active';
+  if (status === 'UNPLANNED') return 'Unplanned';
+  return status || '—';
+}
+
+function blockLabel(block) {
+  const base = String(block.display_ps_id || block.source_ps_id || '').trim();
+  const partial = String(block.display_partial_no || block.pp_partial_no || '1').trim();
+  return { base: base || '—', partial: partial || '1' };
+}
+
+function dateTimeMillis(value) {
+  if (!value) return NaN;
+  const text = String(value).replace(' ', 'T');
+  const millis = Date.parse(text);
+  return Number.isFinite(millis) ? millis : NaN;
+}
+
+function minDateTime(values) {
+  let best = null;
+  let bestMillis = Infinity;
+  for (const value of Array.isArray(values) ? values : []) {
+    const millis = dateTimeMillis(value);
+    if (!Number.isFinite(millis)) continue;
+    if (millis < bestMillis) {
+      best = String(value);
+      bestMillis = millis;
+    }
+  }
+  return best || '';
+}
+
+function maxDateTime(values) {
+  let best = null;
+  let bestMillis = -Infinity;
+  for (const value of Array.isArray(values) ? values : []) {
+    const millis = dateTimeMillis(value);
+    if (!Number.isFinite(millis)) continue;
+    if (millis > bestMillis) {
+      best = String(value);
+      bestMillis = millis;
+    }
+  }
+  return best || '';
+}
+
+function buildGanttDisplayBlocks(rawSegments) {
+  const grouped = new Map();
+  for (const segment of Array.isArray(rawSegments) ? rawSegments : []) {
+    const blockId = Number(segment.block_id || segment.segment_id || 0) || 0;
+    const machineId = Number(segment.machine_id || 0) || 0;
+    const planDate = String(segment.plan_date || '').trim();
+    const key = `${blockId}|${machineId}|${planDate}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        block_id: blockId,
+        machine_id: machineId,
+        plan_date: planDate,
+        segments: [],
+      });
+    }
+    grouped.get(key).segments.push(segment);
+  }
+
+  return Array.from(grouped.values()).map(group => {
+    const segments = [...group.segments].sort((a, b) => (
+      ganttDisplayStartMin(a) - ganttDisplayStartMin(b)
+    ) || (
+      ganttDisplayEndMin(a) - ganttDisplayEndMin(b)
+    ) || (
+      Number(a.segment_id || 0) - Number(b.segment_id || 0)
+    ));
+    const setupSegments = segments.filter(segment => String(segment.segment_type || '').toLowerCase() === 'setup');
+    const productionSegments = segments.filter(segment => String(segment.segment_type || '').toLowerCase() !== 'setup');
+    const primarySegments = productionSegments.length ? productionSegments : segments;
+    const leadingSegment = primarySegments[0] || segments[0] || {};
+    const allVisualStarts = segments.map(segment => segment.visual_start_datetime || segment.start_datetime || '').filter(Boolean);
+    const allVisualEnds = segments.map(segment => segment.visual_end_datetime || segment.end_datetime || '').filter(Boolean);
+    const blockStartMin = segments.reduce((minValue, segment) => Math.min(minValue, ganttDisplayStartMin(segment)), Infinity);
+    const blockEndMin = segments.reduce((maxValue, segment) => Math.max(maxValue, ganttDisplayEndMin(segment)), -Infinity);
+    const setupStartMin = setupSegments.length
+      ? setupSegments.reduce((minValue, segment) => Math.min(minValue, ganttDisplayStartMin(segment)), Infinity)
+      : blockStartMin;
+    const setupEndMin = setupSegments.length
+      ? setupSegments.reduce((maxValue, segment) => Math.max(maxValue, ganttDisplayEndMin(segment)), -Infinity)
+      : blockStartMin;
+    const setupStartDatetime = setupSegments.length
+      ? minDateTime(setupSegments.map(segment => segment.visual_start_datetime || segment.start_datetime || '').filter(Boolean))
+      : (segments[0]?.visual_start_datetime || segments[0]?.start_datetime || '');
+    const setupEndDatetime = setupSegments.length
+      ? maxDateTime(setupSegments.map(segment => segment.visual_end_datetime || segment.end_datetime || '').filter(Boolean))
+      : (segments[0]?.visual_start_datetime || segments[0]?.start_datetime || '');
+    const visualStartDatetime = minDateTime(allVisualStarts);
+    const visualEndDatetime = maxDateTime(allVisualEnds);
+    const setupMinutes = setupSegments.reduce((sum, segment) => sum + Number(segment.minutes_used || 0), 0);
+    const productionMinutes = productionSegments.reduce((sum, segment) => sum + Number(segment.minutes_used || 0), 0);
+    const totalMinutes = segments.reduce((sum, segment) => sum + Number(segment.minutes_used || 0), 0);
+    const productionQty = productionSegments.reduce((sum, segment) => sum + Number(segment.qty || 0), 0);
+    const outputQty = primarySegments.reduce((value, segment) => {
+      const candidate = Number(segment.output_qty || 0);
+      return candidate > 0 ? candidate : value;
+    }, 0);
+    const opOutputQty = segments.reduce((value, segment) => {
+      const candidate = Number(segment.op_output_qty != null ? segment.op_output_qty : segment.output_qty || 0);
+      return candidate > value ? candidate : value;
+    }, 0);
+    const opScheduledQty = segments.reduce((value, segment) => {
+      const candidate = Number(segment.op_scheduled_qty != null ? segment.op_scheduled_qty : segment.scheduled_qty || 0);
+      return candidate > value ? candidate : value;
+    }, 0);
+    const psFinishedQty = segments.reduce((value, segment) => {
+      const candidate = Number(segment.ps_finished_qty || 0);
+      return candidate > value ? candidate : value;
+    }, 0);
+    const psTotalQty = segments.reduce((value, segment) => {
+      const candidate = Number(segment.ps_total_qty || 0);
+      return candidate > value ? candidate : value;
+    }, 0);
+    const psStatus = String(primarySegments[0]?.ps_status || statusFallback.ps_status || primarySegments[0]?.ps_planner_status || statusFallback.ps_planner_status || '').trim();
+    const opFinished = segments.some(segment => Boolean(segment.op_finished))
+      || (opScheduledQty > 0 && opOutputQty + 1e-9 >= opScheduledQty);
+    const psFinished = segments.some(segment => Boolean(segment.ps_finished))
+      || (psTotalQty > 0 && psFinishedQty + 1e-9 >= psTotalQty);
+    const rejectQty = primarySegments.reduce((value, segment) => {
+      const candidate = Number(segment.reject_qty || 0);
+      return candidate > 0 ? candidate : value;
+    }, 0);
+    const actualReportCount = primarySegments.reduce((value, segment) => {
+      const candidate = Number(segment.actual_report_count || 0);
+      return candidate > 0 ? Math.max(value, candidate) : value;
+    }, 0);
+    const scheduledQty = primarySegments.reduce((value, segment) => {
+      const candidate = Number(segment.scheduled_qty || 0);
+      return candidate > 0 ? candidate : value;
+    }, 0);
+    const statusSegment = productionSegments[0] || leadingSegment || {};
+    const statusFallback = segments[0] || {};
+    const setupOnly = productionSegments.length === 0 && setupSegments.length > 0;
+    const opMarkerSegment = segments.find(segment => Boolean(segment.op_finished_marker)) || null;
+    const psMarkerSegment = segments.find(segment => Boolean(segment.ps_finished_marker)) || null;
+
+    if (totalMinutes > 0 && Number.isFinite(dateTimeMillis(visualStartDatetime)) && Number.isFinite(dateTimeMillis(visualEndDatetime)) && dateTimeMillis(visualEndDatetime) <= dateTimeMillis(visualStartDatetime)) {
+      console.warn('[gantt group end bug]', group.block_id, visualStartDatetime, visualEndDatetime, segments);
+    }
+    if (productionSegments.length && setupEndDatetime && visualEndDatetime === setupEndDatetime) {
+      const latestProductionEnd = maxDateTime(productionSegments.map(segment => segment.visual_end_datetime || segment.end_datetime || '').filter(Boolean));
+      if (latestProductionEnd && dateTimeMillis(latestProductionEnd) > dateTimeMillis(visualEndDatetime)) {
+        console.warn('[gantt group end bug]', group.block_id, {
+          setup_end: setupEndDatetime,
+          group_end: visualEndDatetime,
+          production_end: latestProductionEnd,
+        });
+      }
+    }
+
+    return {
+      block_id: group.block_id,
+      machine_id: group.machine_id,
+      plan_date: group.plan_date,
+      segments,
+      segment_ids: segments.map(segment => Number(segment.segment_id || 0)).filter(Boolean),
+      setup_segment_ids: setupSegments.map(segment => Number(segment.segment_id || 0)).filter(Boolean),
+      production_segment_ids: productionSegments.map(segment => Number(segment.segment_id || 0)).filter(Boolean),
+      has_setup: setupSegments.length > 0,
+      has_production: productionSegments.length > 0,
+      setup_minutes: setupMinutes,
+      production_minutes: productionMinutes,
+      total_minutes: totalMinutes,
+      qty: productionQty,
+      scheduled_qty: scheduledQty || Number(statusSegment.scheduled_qty || statusFallback.scheduled_qty || 0) || 0,
+      output_qty: outputQty,
+      op_output_qty: opOutputQty,
+      op_scheduled_qty: opScheduledQty,
+      ps_finished_qty: psFinishedQty,
+      ps_total_qty: psTotalQty,
+      ps_status: psStatus,
+      op_finished: opFinished,
+      ps_finished: psFinished,
+      op_finished_marker: Boolean(opMarkerSegment),
+      ps_finished_marker: Boolean(psMarkerSegment),
+      op_finished_marker_segment_id: opMarkerSegment ? Number(opMarkerSegment.segment_id || 0) : 0,
+      ps_finished_marker_segment_id: psMarkerSegment ? Number(psMarkerSegment.segment_id || 0) : 0,
+      reject_qty: rejectQty,
+      actual_report_count: actualReportCount,
+      display_ps_id: statusSegment.display_ps_id || statusFallback.display_ps_id || statusSegment.source_ps_id || statusFallback.source_ps_id || '',
+      display_partial_no: statusSegment.display_partial_no || statusFallback.display_partial_no || statusSegment.pp_partial_no || statusFallback.pp_partial_no || '1',
+      pp_partial_no: statusSegment.pp_partial_no || statusFallback.pp_partial_no || '1',
+      source_ps_id: statusSegment.source_ps_id || statusFallback.source_ps_id || '',
+      source_op_no: statusSegment.source_op_no || statusFallback.source_op_no || '',
+      operation_name: statusSegment.operation_name || statusFallback.operation_name || '',
+      machine_code: statusSegment.machine_code || statusFallback.machine_code || '',
+      machine_category: statusSegment.machine_category || statusFallback.machine_category || '',
+      shift_profile: statusSegment.shift_profile || statusFallback.shift_profile || '',
+      group_label: statusSegment.group_label || statusFallback.group_label || '',
+      block_type: statusSegment.block_type || statusFallback.block_type || '',
+      planning_status: statusSegment.planning_status || statusFallback.planning_status || '',
+      execution_status: statusSegment.execution_status || statusFallback.execution_status || '',
+      status: statusSegment.status || statusFallback.status || '',
+      remarks: statusSegment.remarks || statusFallback.remarks || '',
+      visual_start_datetime: visualStartDatetime,
+      visual_end_datetime: visualEndDatetime,
+      visual_start_min: blockStartMin === Infinity ? 0 : blockStartMin,
+      visual_end_min: blockEndMin === -Infinity ? 0 : blockEndMin,
+      setup_visual_start_datetime: setupStartDatetime,
+      setup_visual_end_datetime: setupEndDatetime,
+      setup_visual_start_min: setupStartMin === Infinity ? 0 : setupStartMin,
+      setup_visual_end_min: setupEndMin === -Infinity ? 0 : setupEndMin,
+      setup_only: setupOnly,
+    };
+  });
+}
+
+function cellBreakBands(dateText, machine, scale) {
+  const bands = [
+    ...ganttOffWorkBandsForMachine(machine),
+    ...ganttBreakBandsForDateMachine(dateText, machine),
+  ];
+  return bands.map(band => {
+    const startMin = Number(band.startMinute || 0);
+    const endMin = Number(band.endMinute || 0);
+    const top = scale.minuteToY(Math.max(startMin, DAY_START));
+    const height = Math.max(0, scale.minuteToY(Math.min(endMin, DAY_END)) - top);
+    if (height <= 0) return '';
+    const className = band.kind === 'offwork' ? 'gantt-offwork-band' : 'gantt-break-band';
+    const compactStyle = band.kind === 'offwork' && scale.mode === 'compact' ? 'background:rgba(100,116,139,0.18);' : '';
+    return `<div class="${className}" style="top:${top}px;height:${height}px;${compactStyle}"></div>`;
+  }).join('');
+}
+
+function blockStyle(block) {
+  if (String(block.block_type || '').toUpperCase() === 'REWORK') {
+    return { background: 'rgba(239,68,68,0.82)', borderColor: 'rgba(239,68,68,1)', textColor: '#fff', opacity: '1', className: 'segment-rework' };
+  }
+  if (!block.has_production && block.has_setup) {
+    return { background: 'rgba(100,116,139,0.55)', borderColor: 'rgba(100,116,139,0.95)', textColor: 'var(--text)', opacity: '1', className: 'segment-setup' };
+  }
+  return { background: 'rgba(59,130,246,0.72)', borderColor: 'rgba(59,130,246,0.95)', textColor: '#fff', opacity: '0.95', className: 'segment-production' };
+}
+
+let ganttConnectorRenderFrame = 0;
+let ganttConnectorObserversBound = false;
+const GANTT_CONNECTOR_DEBUG = false;
+
+function ensureGanttConnectorLayer() {
+  const content = document.querySelector('.gantt-scroll-content');
+  if (!content) return null;
+  let layer = content.querySelector('#gantt-connector-layer');
+  if (!layer) {
+    layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    layer.id = 'gantt-connector-layer';
+    layer.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    layer.setAttribute('aria-hidden', 'true');
+    content.insertBefore(layer, content.firstChild);
+  }
+  return layer;
+}
+
+function updateGanttConnectorLayerBounds() {
+  const layer = ensureGanttConnectorLayer();
+  const content = document.querySelector('.gantt-scroll-content');
+  if (!layer || !content) return null;
+  const width = Math.max(1, content.scrollWidth);
+  const height = Math.max(1, content.scrollHeight);
+  layer.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  layer.setAttribute('width', `${width}`);
+  layer.setAttribute('height', `${height}`);
+  layer.style.width = `${width}px`;
+  layer.style.height = `${height}px`;
+  return { width, height, content };
+}
+
+function scheduleGanttConnectorRender() {
+  if (ganttConnectorRenderFrame) return;
+  ganttConnectorRenderFrame = window.requestAnimationFrame(() => {
+    ganttConnectorRenderFrame = 0;
+    renderGanttContinuityConnectors();
+  });
+}
+
+function bindGanttConnectorObservers() {
+  if (ganttConnectorObserversBound) return;
+  const container = getGanttContainer();
+  if (container) {
+    container.addEventListener('scroll', scheduleGanttConnectorRender, { passive: true });
+  }
+  window.addEventListener('resize', scheduleGanttConnectorRender, { passive: true });
+  window.addEventListener('scroll', scheduleGanttConnectorRender, { passive: true });
+  ganttConnectorObserversBound = true;
+}
+
+function renderGanttContinuityConnectors() {
+  const layer = ensureGanttConnectorLayer();
+  const container = getGanttContainer();
+  const content = document.querySelector('.gantt-scroll-content');
+  if (!layer || !container || !content) return;
+  const geometry = updateGanttConnectorLayerBounds();
+  if (!geometry) return;
+  const contentRect = content.getBoundingClientRect();
+  const headerEl = content.querySelector('div[style*="position:sticky;top:0;z-index:25"]');
+  const headerBottom = headerEl ? headerEl.getBoundingClientRect().bottom - contentRect.top : 0;
+
+  layer.innerHTML = '';
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', 'gantt-arrowhead');
+  marker.setAttribute('viewBox', '0 0 10 10');
+  marker.setAttribute('markerWidth', '5');
+  marker.setAttribute('markerHeight', '5');
+  marker.setAttribute('refX', '10');
+  marker.setAttribute('refY', '5');
+  marker.setAttribute('orient', 'auto');
+  marker.setAttribute('markerUnits', 'userSpaceOnUse');
+  const markerPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  markerPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  markerPath.setAttribute('fill', 'rgba(59,130,246,0.65)');
+  markerPath.setAttribute('stroke', 'rgba(59,130,246,0.65)');
+  markerPath.setAttribute('stroke-width', '0.4');
+  marker.appendChild(markerPath);
+  defs.appendChild(marker);
+  layer.appendChild(defs);
+
+  const blocks = Array.from(container.querySelectorAll('.gantt-block[data-block-id]'));
+  const grouped = new Map();
+  for (const blockEl of blocks) {
+    if (blockEl.dataset.connectable !== '1') continue;
+    const blockId = String(blockEl.dataset.blockId || '').trim();
+    if (!blockId) continue;
+    if (!grouped.has(blockId)) grouped.set(blockId, []);
+    grouped.get(blockId).push(blockEl);
+  }
+
+  const paths = [];
+  grouped.forEach(group => {
+    if (group.length < 2) return;
+    const pieces = group.map((el, index) => {
+      const rect = el.getBoundingClientRect();
+      const top = rect.top - contentRect.top;
+      const left = rect.left - contentRect.left;
+      return {
+        el,
+        rect,
+        index,
+        ganttDate: String(el.dataset.ganttDate || ''),
+        machineId: String(el.dataset.machineId || ''),
+        startDatetime: String(el.dataset.visualStartDatetime || ''),
+        startMin: Number(el.dataset.startMin || 0),
+        endMin: Number(el.dataset.endMin || 0),
+        top,
+        left,
+        right: left + rect.width,
+        bottom: top + rect.height,
+      };
+    }).filter(piece => piece.rect.width > 0 && piece.rect.height > 0 && piece.bottom > headerBottom)
+      .sort((a, b) => (
+        String(a.startDatetime || '').localeCompare(String(b.startDatetime || ''))
+      ) || (
+        Number(a.startMin || 0) - Number(b.startMin || 0)
+      ) || (
+        String(a.ganttDate || '').localeCompare(String(b.ganttDate || ''))
+      ) || (
+        Number(a.index || 0) - Number(b.index || 0)
+      ));
+    for (let i = 0; i < pieces.length - 1; i += 1) {
+      const source = pieces[i];
+      const target = pieces[i + 1];
+      if (source.bottom <= headerBottom || target.bottom <= headerBottom) continue;
+      const sourceX = source.left + (source.rect.width / 2);
+      const sourceY = source.bottom;
+      const targetX = target.left + (target.rect.width / 2);
+      const targetY = target.top;
+      const curveY1 = sourceY + Math.max(24, Math.min(80, Math.abs(targetY - sourceY) / 2));
+      const curveY2 = targetY - 24;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', `M ${sourceX.toFixed(2)} ${sourceY.toFixed(2)} C ${sourceX.toFixed(2)} ${curveY1.toFixed(2)}, ${targetX.toFixed(2)} ${curveY2.toFixed(2)}, ${targetX.toFixed(2)} ${targetY.toFixed(2)}`);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', 'rgba(59,130,246,0.45)');
+      path.setAttribute('stroke-width', '1.4');
+      path.setAttribute('stroke-dasharray', '4 4');
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('marker-end', 'url(#gantt-arrowhead)');
+      path.style.filter = 'drop-shadow(0 0 1px rgba(255,255,255,0.28))';
+      paths.push(path);
+      if (GANTT_CONNECTOR_DEBUG) {
+        const startDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        startDot.setAttribute('cx', sourceX.toFixed(2));
+        startDot.setAttribute('cy', sourceY.toFixed(2));
+        startDot.setAttribute('r', '2.5');
+        startDot.setAttribute('fill', 'rgba(59,130,246,0.8)');
+        const endDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        endDot.setAttribute('cx', targetX.toFixed(2));
+        endDot.setAttribute('cy', targetY.toFixed(2));
+        endDot.setAttribute('r', '2.5');
+        endDot.setAttribute('fill', 'rgba(239,68,68,0.8)');
+        paths.push(startDot, endDot);
+      }
+    }
+  });
+
+  paths.forEach(path => layer.appendChild(path));
+}
+
+function renderGanttMachineFilters(machines) {
+  const host = document.getElementById('gantt-machine-chips');
+  if (!host) return;
+  const types = [...new Set((machines || []).map(m => String(m.machine_category || '').trim()).filter(Boolean))].sort();
+  if (ganttSelectedMachineType !== 'all' && !types.includes(ganttSelectedMachineType)) {
+    ganttSelectedMachineType = 'all';
+  }
+  host.innerHTML = [
+    `<button type="button" class="chip ${ganttSelectedMachineType === 'all' ? 'active' : ''}" onclick="setGanttMachineFilter('all')">All types</button>`,
+    ...types.map(type => `<button type="button" class="chip ${ganttSelectedMachineType === type ? 'active' : ''}" onclick="setGanttMachineFilter('${escapeHtml(type)}')">${escapeHtml(type)}</button>`),
+  ].join('');
+}
+
+function setGanttMachineFilter(machineType) {
+  ganttSelectedMachineType = String(machineType || 'all');
+  renderGanttMachineFilters(ganttLastMachines);
+  renderGantt(ganttTrialDataCache || { machines: [], blocks: [], dates: [], calendar: [] });
+  scheduleGanttConnectorRender();
+}
+
+function bindGanttInfiniteScroll() {
+  const container = document.getElementById('gantt-container');
+  if (!container || ganttScrollBindingInstalled) return;
+  container.addEventListener('scroll', maybeLoadMoreOnScroll, { passive: true });
+  ganttScrollBindingInstalled = true;
+}
+
+function getGanttContainer() {
+  return document.getElementById('gantt-container');
+}
+
+function normalizeGanttRange(startDate, endDate) {
+  const start = String(startDate || localISODate());
+  const end = String(endDate || start);
+  return compareISODate(start, end) <= 0 ? [start, end] : [end, start];
+}
+
+async function fetchAndMergeGanttRange(startDate, endDate, direction = 'replace', options = {}) {
+  const [startIso, endIso] = normalizeGanttRange(startDate, endDate);
+  if (ganttIsLoadingMore) return;
+  ganttIsLoadingMore = true;
+  const container = getGanttContainer();
+  const preserveScroll = direction === 'prepend' && container && !options.skipPreserve;
+  const beforeScrollTop = preserveScroll ? container.scrollTop : 0;
+  const beforeScrollHeight = preserveScroll ? container.scrollHeight : 0;
+  try {
+    const data = await GET(`/api/trial/gantt?from=${startIso}&to=${endIso}&include_completed=1`);
+    mergeGanttPayload(data || {}, { replace: direction === 'replace' });
+    if (direction !== 'replace' && !Array.isArray(data?.dates)) {
+      updateGanttLoadedRangeLabel();
+    }
+    renderGantt(ganttTrialDataCache || { machines: [], blocks: [], dates: [], calendar: [] });
+    if (preserveScroll) {
+      requestAnimationFrame(() => {
+        const newContainer = getGanttContainer();
+        if (!newContainer) return;
+        const afterScrollHeight = newContainer.scrollHeight;
+        newContainer.scrollTop = Math.max(0, afterScrollHeight - beforeScrollHeight + beforeScrollTop);
+        scheduleGanttConnectorRender();
+      });
+    }
+  } catch (err) {
+    console.error('[Gantt fetch failed]', err);
+    if (container && direction === 'replace') {
+      container.innerHTML = `<div style="padding:16px;color:var(--red);font-size:13px">Failed to load Gantt: ${escapeHtml(err && err.message ? err.message : String(err))}</div>`;
+    }
+  } finally {
+    ganttIsLoadingMore = false;
+  }
+}
+
+async function loadGanttWindowAroundDate(dateText) {
+  const target = String(dateText || localISODate());
+  ganttAnchorDate = target;
+  updateGanttJumpInput(target);
+  const start = addDaysToISODate(target, -GANTT_INITIAL_DAYS_BEFORE);
+  const end = addDaysToISODate(target, GANTT_INITIAL_DAYS_AFTER);
+  await fetchAndMergeGanttRange(start, end, 'replace');
+  scrollToGanttDate(target, { center: true });
+}
+
+function jumpToSelectedDate() {
+  const input = document.getElementById('gantt-jump-date');
+  const target = input && input.value ? input.value : localISODate();
+  loadGanttWindowAroundDate(target);
+}
+
+function jumpToToday() {
+  const today = localISODate();
+  if (ganttLoadedStart && ganttLoadedEnd && compareISODate(today, ganttLoadedStart) >= 0 && compareISODate(today, ganttLoadedEnd) <= 0) {
+    ganttAnchorDate = today;
+    updateGanttJumpInput(today);
+    scrollToGanttDate(today, { center: true });
+    return;
+  }
+  loadGanttWindowAroundDate(today);
+}
+
+function reloadCurrentWindow() {
+  if (ganttAnchorDate) {
+    loadGanttWindowAroundDate(ganttAnchorDate);
+  } else {
+    loadGanttWindowAroundDate(localISODate());
+  }
+}
+
+async function ensureGanttDateLoaded(dateText) {
+  const target = String(dateText || localISODate());
+  if (!ganttLoadedStart || !ganttLoadedEnd) {
+    await loadGanttWindowAroundDate(target);
+    return;
+  }
+  if (compareISODate(target, ganttLoadedStart) < 0) {
+    const start = addDaysToISODate(target, -GANTT_INITIAL_DAYS_BEFORE);
+    await fetchAndMergeGanttRange(start, ganttLoadedStart, 'prepend');
+  } else if (compareISODate(target, ganttLoadedEnd) > 0) {
+    const end = addDaysToISODate(target, GANTT_INITIAL_DAYS_AFTER);
+    await fetchAndMergeGanttRange(ganttLoadedEnd, end, 'append');
+  }
+}
+
+async function maybeLoadMoreOnScroll() {
+  const container = getGanttContainer();
+  if (!container || ganttIsLoadingMore || !ganttLoadedStart || !ganttLoadedEnd) return;
+  const scrollTop = container.scrollTop;
+  const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+  if (scrollTop < GANTT_SCROLL_LOAD_THRESHOLD) {
+    const start = addDaysToISODate(ganttLoadedStart, -GANTT_PREPEND_DAYS);
+    await fetchAndMergeGanttRange(start, ganttLoadedStart, 'prepend');
+  } else if (remaining < GANTT_SCROLL_LOAD_THRESHOLD) {
+    const end = addDaysToISODate(ganttLoadedEnd, GANTT_APPEND_DAYS);
+    await fetchAndMergeGanttRange(ganttLoadedEnd, end, 'append');
+  }
+}
+
+function scrollToGanttDate(dateText, { center = false } = {}) {
+  const container = getGanttContainer();
+  if (!container) return;
+  const safeDate = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(String(dateText || '')) : String(dateText || '');
+  const row = container.querySelector(`.gantt-day-row[data-gantt-date="${safeDate}"]`);
+  if (!row) return;
+  const targetTop = Math.max(0, row.offsetTop - (center ? (container.clientHeight / 2) : 24));
+  container.scrollTop = targetTop;
+  scheduleGanttConnectorRender();
+}
+
+function renderGantt(data) {
+  const scale = getCurrentGanttTimeScale();
+  syncGanttTimeScaleToggle();
+  const allMachines = Array.isArray(data.machines) ? data.machines : [];
+  const machineTypeById = {};
+  allMachines.forEach(machine => {
+    machineTypeById[String(machine.machine_id)] = String(machine.machine_category || '').trim();
+  });
+  const machines = ganttSelectedMachineType === 'all'
+    ? allMachines
+    : allMachines.filter(machine => String(machine.machine_category || '').trim() === String(ganttSelectedMachineType));
+  const blocks = Array.isArray(data.blocks)
+    ? data.blocks.filter(block => ganttSelectedMachineType === 'all' || String(machineTypeById[String(block.machine_id)] || '') === String(ganttSelectedMachineType))
+    : [];
+  const dates = Array.isArray(data.dates) ? data.dates : [];
+  const calMap = {};
+  (Array.isArray(data.calendar) ? data.calendar : []).forEach(c => { calMap[c.work_date] = c; });
+  const displayBlocks = buildGanttDisplayBlocks(blocks).sort((a, b) => (
+    ganttDisplayStartMin(a) - ganttDisplayStartMin(b)
+  ) || (
+    ganttDisplayEndMin(a) - ganttDisplayEndMin(b)
+  ) || (
+    Number(a.block_id || 0) - Number(b.block_id || 0)
+  ));
+  ganttTrialDataCache.display_blocks = displayBlocks;
+  const blockPieceCounts = displayBlocks.reduce((acc, block) => {
+    const key = String(block.block_id || '');
+    if (!key) return acc;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const blockPieceOrder = {};
+
+  const weekWidth = 60;
+  const dayWidth = 90;
+  const timeWidth = 84;
+  const machineWidth = 150;
+  const totalColumnWidth = machines.length * machineWidth;
+  let html = `<div class="gantt-scroll-content" style="min-width:${weekWidth + dayWidth + timeWidth + totalColumnWidth}px">`;
+  html += `<div style="position:sticky;top:0;z-index:25;background:var(--bg2)">`;
+  html += `<div style="display:flex;border-bottom:1px solid var(--border2)">`;
+  html += `<div style="width:${weekWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Wk</div>`;
+  html += `<div style="width:${dayWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Day / Date</div>`;
+  html += `<div style="width:${timeWidth}px;flex-shrink:0;padding:8px 6px;background:var(--bg3);border-right:1px solid var(--border2);font-size:11px;color:var(--text3);text-align:center;display:flex;align-items:center;justify-content:center">Time</div>`;
+  for (const machine of machines) {
+    html += `<div style="width:${machineWidth}px;flex-shrink:0;padding:8px 4px;background:var(--bg3);border-right:1px solid var(--border);text-align:center">
+      <div style="font-weight:700;font-size:12px">${escapeHtml(machine.machine_code || '')}</div>
+      <div style="font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(machine.machine_category || '')}</div>
+    </div>`;
+  }
+  html += `</div></div>`;
+
+  for (const d of dates) {
+    const displayDate = new Date(`${d}T00:00:00`);
+    const cal = calMap[d];
+    const isWorkingDay = cal ? Number(cal.is_working_day || 0) === 1 : (displayDate.getDay() !== 0 && displayDate.getDay() !== 6);
+    const isSelectedDate = String(d) === String(ganttAnchorDate || '');
+    const isToday = d === localISODate();
+    const weekLabel = `WK ${String(Math.floor((displayDate.getDate() - 1) / 7) + 1).padStart(2, '0')}`;
+    html += `<div class="gantt-day-row" data-gantt-date="${escapeHtml(d)}" style="display:flex;position:relative;background:${isSelectedDate ? 'rgba(59,130,246,0.04)' : 'transparent'};outline:${isSelectedDate ? '1px solid rgba(59,130,246,0.18)' : 'none'}">`;
+    html += `<div style="width:${weekWidth}px;flex-shrink:0;height:${scale.rowHeight}px;position:sticky;left:0;background:${isWorkingDay ? (isSelectedDate ? 'rgba(59,130,246,0.08)' : 'var(--bg2)') : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border);padding:0 4px">
+      <div style="position:sticky;top:44px;display:flex;align-items:center;justify-content:center;min-height:44px;font-size:11px;color:var(--text2);font-weight:700;text-align:center;background:${isWorkingDay ? 'var(--bg2)' : 'rgba(239,68,68,0.08)'}">${weekLabel}</div>
+    </div>`;
+    html += `<div style="width:${dayWidth}px;flex-shrink:0;height:${scale.rowHeight}px;position:sticky;left:${weekWidth}px;background:${isWorkingDay ? (isSelectedDate ? 'rgba(59,130,246,0.08)' : 'var(--bg2)') : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border)">
+      <div style="position:sticky;top:44px;min-height:68px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 6px;text-align:center;background:${isWorkingDay ? (isSelectedDate ? 'rgba(59,130,246,0.08)' : 'var(--bg2)') : 'rgba(239,68,68,0.08)'}">
+        <div style="font-weight:700;color:${isToday ? 'var(--accent)' : 'var(--text)'}">${displayDate.toLocaleDateString('en', { weekday:'short' })}</div>
+        <div style="font-size:11px;color:var(--text2)">${displayDate.getDate()}/${displayDate.getMonth() + 1}</div>
+        ${!isWorkingDay ? '<div style="font-size:10px;color:var(--red)">OFF</div>' : ''}
+      </div>
+    </div>`;
+    html += `<div style="width:${timeWidth}px;flex-shrink:0;height:${scale.rowHeight}px;position:sticky;left:${weekWidth + dayWidth}px;background:${isWorkingDay ? (isSelectedDate ? 'rgba(59,130,246,0.08)' : 'var(--bg2)') : 'rgba(239,68,68,0.08)'};z-index:15;border-right:1px solid var(--border2);border-bottom:1px solid var(--border)">
+      <div style="position:relative;height:${scale.rowHeight}px;display:flex;align-items:center;justify-content:center">
+        ${scale.ticks.map(tick => {
+          const top = scale.minuteToY(tick.minute);
+          return `<div style="position:absolute;top:${top}px;left:0;right:0;font-size:10px;color:var(--text3);text-align:center;transform:translateY(-50%);${scale.mode === 'compact' && (tick.minute === 0 || tick.minute === 1440) ? 'font-weight:800;' : ''}">${escapeHtml(tick.label)}</div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+    for (const machine of machines) {
+      const dayBlocks = displayBlocks.filter(block => String(block.machine_id || '') === String(machine.machine_id || '') && String(block.plan_date || '') === String(d || ''));
+      html += `<div data-gantt-date="${escapeHtml(d)}" data-machine-id-col="${machine.machine_id}" data-date-drop="${d}" style="width:${machineWidth}px;flex-shrink:0;height:${scale.rowHeight}px;position:relative;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${!isWorkingDay ? 'rgba(239,68,68,0.05)' : (isSelectedDate ? 'rgba(59,130,246,0.03)' : 'transparent')}">`;
+      ganttOffWorkBandsForMachine(machine).forEach(band => {
+        const top = scale.minuteToY(band.startMinute);
+        const height = Math.max(0, scale.minuteToY(band.endMinute) - top);
+        if (height > 0) {
+          const compactStyle = scale.mode === 'compact' ? 'background:rgba(100,116,139,0.18);' : '';
+          html += `<div class="gantt-offwork-band" style="top:${top}px;height:${height}px;${compactStyle}"></div>`;
+        }
+      });
+      scale.amPmBands.forEach(band => {
+        const top = scale.minuteToY(band.startMinute);
+        const height = Math.max(0, scale.minuteToY(band.endMinute) - top);
+        if (height > 0) {
+          const bandColor = band.label === 'AM'
+            ? (scale.mode === 'compact' ? 'rgba(59,130,246,0.10)' : 'rgba(59,130,246,0.04)')
+            : (scale.mode === 'compact' ? 'rgba(245,158,11,0.12)' : 'rgba(245,158,11,0.05)');
+          html += `<div style="position:absolute;left:0;right:0;top:${top}px;height:${height}px;background:${bandColor};pointer-events:none;z-index:0"></div>`;
+        }
+      });
+      if (scale.mode === 'compact') {
+        const noonTop = scale.minuteToY(720);
+        html += `<div style="position:absolute;left:0;right:0;top:${noonTop}px;height:1px;background:rgba(15,23,42,0.12);pointer-events:none;z-index:1"></div>`;
+      }
+      html += cellBreakBands(d, machine, scale);
+
+      for (const block of dayBlocks) {
+        const startMin = Math.max(DAY_START, Math.min(DAY_END, ganttDisplayStartMin(block)));
+        const endMin = Math.max(startMin + 1, Math.max(DAY_START, Math.min(DAY_END, ganttDisplayEndMin(block))));
+        const top = scale.minuteToY(startMin);
+        const height = Math.max(18, scale.minuteToY(endMin) - top);
+        const style = blockStyle(block);
+        const label = blockLabel(block);
+        const opText = [block.source_op_no, block.operation_name].filter(Boolean).join(' / ');
+        const setupStartMin = Number(block.setup_visual_start_min != null ? block.setup_visual_start_min : block.visual_start_min || startMin);
+        const setupEndMin = Number(block.setup_visual_end_min != null ? block.setup_visual_end_min : block.visual_start_min || startMin);
+        const setupTop = block.has_setup ? Math.max(0, scale.minuteToY(Math.max(DAY_START, Math.min(DAY_END, setupStartMin))) - top) : 0;
+        const setupHeight = block.has_setup ? Math.max(0, scale.minuteToY(Math.max(DAY_START, Math.min(DAY_END, setupEndMin))) - scale.minuteToY(Math.max(DAY_START, Math.min(DAY_END, setupStartMin)))) : 0;
+        if (String(block.start_datetime || '') !== String(block.visual_start_datetime || '') || String(block.end_datetime || '') !== String(block.visual_end_datetime || '')) {
+          console.debug('[gantt visual]', block.block_id, {
+            stored_start: block.start_datetime,
+            stored_end: block.end_datetime,
+            visual_start: ganttDisplayStartDateTime(block),
+            visual_end: ganttDisplayEndDateTime(block),
+          });
+        }
+        const blockId = String(block.block_id || 0);
+        const pieceIndex = (blockPieceOrder[blockId] || 0) + 1;
+        blockPieceOrder[blockId] = pieceIndex;
+        const connectable = Number(blockPieceCounts[blockId] || 0) > 1 ? '1' : '0';
+        const blockPadding = scale.mode === 'compact' ? '1px 3px' : '2px 4px';
+        const blockFontSize = scale.mode === 'compact' ? '9px' : '10px';
+        const finishLabel = finishStateLabel(block);
+        const finishClass = finishStateClass(block);
+        const showFinishLabel = Boolean(finishLabel) && height >= (scale.mode === 'compact' ? 28 : 24);
+        html += `<div class="gantt-block ${style.className}" data-block-id="${escapeHtml(block.block_id || 0)}" data-segment-ids="${escapeHtml((block.segment_ids || []).join(','))}" data-start-min="${escapeHtml(ganttDisplayStartMin(block))}" data-end-min="${escapeHtml(ganttDisplayEndMin(block))}" data-visual-start-datetime="${escapeHtml(ganttDisplayStartDateTime(block))}" data-visual-end-datetime="${escapeHtml(ganttDisplayEndDateTime(block))}" data-gantt-date="${escapeHtml(block.plan_date || '')}" data-machine-id="${escapeHtml(block.machine_id || 0)}" data-piece-index="${pieceIndex}" data-connectable="${connectable}" title="${escapeHtml(`${label.base}${label.partial ? ` · Partial ${label.partial}` : ''} · ${ganttDisplayTimeRange(block)}`)}"
+          style="position:absolute;left:4px;right:4px;top:${top}px;height:${height}px;background:${style.background};border:1px solid ${style.borderColor};border-radius:4px;padding:${blockPadding};font-size:${blockFontSize};color:${style.textColor};overflow:hidden;cursor:pointer;z-index:5;opacity:${style.opacity}">
+          ${block.has_setup ? `<div class="gantt-setup-section" style="top:${setupTop}px;height:${setupHeight}px;${block.setup_only ? '' : 'border-bottom:1px solid rgba(15,23,42,0.18);'}"></div>` : ''}
+          <div class="gantt-bar-content ${scale.mode === 'compact' ? 'compact-mode' : ''}">
+            <div style="font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(label.base)}</div>
+            <div class="gantt-block-secondary" style="font-size:9px;opacity:0.9">${escapeHtml(label.partial ? `Partial ${label.partial}` : '')}${block.has_setup ? ' · setup + run' : ''}</div>
+            <div class="gantt-block-operation" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(opText)}</div>
+            <div class="gantt-block-qty" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Qty: ${fmt(block.qty)} u${block.output_qty > 0 ? ` | Out: ${fmt(block.output_qty)} u` : ''}</div>
+            <div class="gantt-block-time" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Time: ${ganttDisplayTimeRange(block)}</div>
+          </div>
+          <div class="gantt-finish-cap ${finishClass}" aria-hidden="true"></div>
+          ${showFinishLabel ? `<div class="gantt-finish-state-text ${finishClass}">${escapeHtml(finishLabel)}</div>` : ''}
+          <div class="gantt-finish-badge">${escapeHtml(ganttFinishTime(block))}</div>
+        </div>`;
+      }
+
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  const container = document.getElementById('gantt-container');
+  if (container) container.innerHTML = html;
+  bindGanttBlockEvents();
+  bindGanttInfiniteScroll();
+  bindGanttConnectorObservers();
+  scheduleGanttConnectorRender();
+}
+
+function bindGanttBlockEvents() {
+  document.querySelectorAll('.gantt-block').forEach(el => {
+    el.setAttribute('draggable', 'false');
+    el.addEventListener('click', () => {
+      showBlockDetail(el.dataset.blockId, el.dataset.machineId, el.dataset.ganttDate);
+    });
+  });
+}
+
+function showBlockDetail(blockId, machineId, planDate) {
+  const blocks = Array.isArray(ganttTrialDataCache?.display_blocks) ? ganttTrialDataCache.display_blocks : [];
+  const block = blocks.find(item => String(item.block_id) === String(blockId) && String(item.machine_id) === String(machineId) && String(item.plan_date) === String(planDate))
+    || blocks.find(item => String(item.block_id) === String(blockId))
+    || null;
+  if (!block) return;
+
+  const label = blockLabel(block);
+  const opText = [block.source_op_no, block.operation_name].filter(Boolean).join(' / ') || '—';
+  const actualSummary = Number(block.actual_report_count || 0) > 0
+    ? `${fmt(block.actual_report_count)} reports`
+    : 'No actuals reported';
+  const panel = document.getElementById('block-detail');
+  document.getElementById('bd-title').textContent = `${label.base}${label.partial ? ` · Partial ${label.partial}` : ''}`;
+  document.getElementById('bd-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div><div class="field-hint">Operation</div><strong>${escapeHtml(opText)}</strong></div>
+      <div><div class="field-hint">Machine</div><strong>${escapeHtml(block.machine_code || '–')}</strong></div>
+      <div><div class="field-hint">Date</div>${escapeHtml(block.plan_date || '–')}</div>
+      <div><div class="field-hint">Time</div>${escapeHtml(ganttDisplayTimeRange(block))}</div>
+      <div><div class="field-hint">Expected Finish</div>${escapeHtml(ganttFinishTime(block))}</div>
+      <div><div class="field-hint">Setup</div>${fmt(block.setup_minutes || 0, 0)} productive min</div>
+      <div><div class="field-hint">Production</div>${fmt(block.production_minutes || 0, 0)} productive min</div>
+      <div><div class="field-hint">Total duration</div>${fmt(block.total_minutes || 0, 0)} productive min</div>
+      <div><div class="field-hint">Qty</div>${fmt(block.qty)} / ${fmt(block.scheduled_qty)} scheduled</div>
+      <div><div class="field-hint">Output</div>${fmt(block.output_qty)}</div>
+      <div><div class="field-hint">Reject</div>${fmt(block.reject_qty)}</div>
+      <div><div class="field-hint">Operation Status</div>${escapeHtml(operationStatusLabel(block))}</div>
+      <div><div class="field-hint">PS Status</div>${escapeHtml(processSheetStatusLabel(block))}</div>
+      <div><div class="field-hint">Actuals</div>${escapeHtml(actualSummary)}</div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--text3)">Block ${escapeHtml(String(block.block_id || ''))}</div>
+  `;
+  panel.style.display = 'block';
+}
+
+async function initializeGantt() {
+  updateGanttJumpInput(ganttAnchorDate);
+  syncGanttTimeScaleToggle();
+  bindGanttInfiniteScroll();
+  bindGanttConnectorObservers();
+  await loadGanttWindowAroundDate(ganttAnchorDate);
+}
+
+initializeGantt();
+</script>
+{% endblock %}

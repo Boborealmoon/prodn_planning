@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Materials{% endblock %}
+{% block page_title %}Materials{% endblock %}
+{% block content %}
+<div class="dashboard-hero">
+  <div class="dashboard-hero-copy">
+    <h2>Material Readiness</h2>
+    <p>Focused view of unfinished planned process sheets that need material coverage before production begins.</p>
+  </div>
+  <div class="dashboard-metrics">
+    <div class="dashboard-metric">
+      <div class="label">Lead Rule</div>
+      <div class="value">D-2</div>
+    </div>
+  </div>
+</div>
+
+<div class="mini-stats" id="mat-stats"></div>
+
+<div class="dashboard-section">
+  <div class="dashboard-section-header">
+    <div class="dashboard-section-title">Material Queue</div>
+    <div class="dashboard-note">Only planned or partially planned unfinished PS are shown here.</div>
+  </div>
+  <div class="table-wrap" id="mat-wrap">
+    <div class="loading"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<script>
+async function loadMaterials() {
+  const data = await GET('/api/materials');
+  renderStats(data);
+  render(data);
+}
+
+function renderStats(data) {
+  const el = document.getElementById('mat-stats');
+  const shortage = data.filter(m => Number(m.covered_qty || 0) + 1e-9 < Number(m.total_qty || 0)).length;
+  const ready = data.filter(m => !!m.material_ready).length;
+  el.innerHTML = `
+    <div class="mini-stat"><div class="label">Tracked PS</div><div class="value">${data.length}</div></div>
+    <div class="mini-stat"><div class="label">Material Ready</div><div class="value" style="color:var(--green)">${ready}</div></div>
+    <div class="mini-stat"><div class="label">Shortages</div><div class="value" style="color:var(--red)">${shortage}</div></div>`;
+}
+
+function render(data) {
+  const wrap = document.getElementById('mat-wrap');
+  if (!data.length) {
+    wrap.innerHTML = '<div class="empty-state"><div class="icon">M</div><p>No unfinished planned PS currently need material follow-up.</p></div>';
+    return;
+  }
+
+  let html = `<table>
+    <thead><tr>
+      <th>PS</th><th>Part</th><th>Material</th><th>Expected Start</th><th>Need By</th>
+      <th>Ready?</th><th>Ready Qty</th><th>Covered / Need</th><th>Order Status</th><th>Shortage</th><th>Actions</th>
+    </tr></thead><tbody>`;
+
+  for (const m of data) {
+    const shortage = Number(m.covered_qty || 0) + 1e-9 < Number(m.total_qty || 0);
+    html += `
+      <tr>
+        <td><strong>${m.ps_id}</strong><div style="font-size:11px;color:var(--text3)">Planned ${fmt(m.planned_qty || 0)} | Remaining ${fmt(m.remaining_qty || 0)}</div></td>
+        <td><strong>${m.part_name || '-'}</strong><div style="font-size:11px;color:var(--text3)">${m.part_desc || ''}</div></td>
+        <td>${m.material_name || '-'}</td>
+        <td>${m.expected_start || '-'}</td>
+        <td>${m.need_by_date || '-'}</td>
+        <td>${m.material_ready ? '<span class="badge badge-green">YES</span>' : '<span class="badge badge-red">NO</span>'}</td>
+        <td style="text-align:right">${fmt(m.material_ready_qty || 0)}</td>
+        <td style="text-align:right;color:${shortage ? 'var(--red)' : 'var(--green)'}">${fmt(m.covered_qty || 0)} / ${fmt(m.total_qty || 0)}</td>
+        <td>
+          ${m.order_status === 'NA' ? '<span class="badge badge-gray">N/A</span>' :
+            m.order_status === 'ORDERED' ? '<span class="badge badge-blue">Ordered</span>' :
+            '<span class="badge badge-yellow">To Order</span>'}
+        </td>
+        <td>${shortage ? '<span class="warn-chip warn-shortage">Shortage</span>' : '<span style="color:var(--green)">Ready</span>'}</td>
+        <td>
+          <div class="td-actions">
+            <button class="btn btn-sm btn-ghost" onclick="editMaterial(${m.mat_id})">Edit</button>
+            <button class="btn btn-sm btn-ghost" onclick="addOrderLog(${m.mat_id})">Order Log</button>
+          </div>
+        </td>
+      </tr>`;
+
+    if (m.order_logs && m.order_logs.length) {
+      html += `<tr><td colspan="11" style="padding:0 0 8px 32px;background:var(--bg)">
+        <table style="font-size:12px;width:auto;min-width:500px">
+          <thead><tr>
+            <th>Order Date</th><th>Expected</th><th>Ordered Qty</th><th>Received Qty</th><th>Status</th><th>Note</th>
+          </tr></thead>
+          <tbody>${m.order_logs.map(l => `<tr>
+            <td>${l.order_date || '-'}</td><td>${l.expected_date || '-'}</td>
+            <td style="text-align:right">${fmt(l.ordered_qty || 0)}</td>
+            <td style="text-align:right">${fmt(l.received_qty || 0)}</td>
+            <td>${l.log_status || ''}</td><td style="color:var(--text3)">${l.note || ''}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </td></tr>`;
+    }
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+async function editMaterial(matId) {
+  const data = await GET('/api/materials');
+  const m = data.find(x => x.mat_id === matId);
+  if (!m) return;
+  openModal('Edit Material', `
+    <div class="field"><label>Need By</label><input type="date" id="em-needby" value="${m.need_by_date || ''}"></div>
+    <div class="field"><label>Material Name</label><input id="em-name" value="${m.material_name || ''}"></div>
+    <div class="field-row">
+      <div class="field"><label>Material Ready?</label>
+        <select id="em-ready" onchange="document.getElementById('em-notready').style.display=this.value==='1'?'none':'block'">
+          <option value="0" ${!m.material_ready ? 'selected' : ''}>No</option>
+          <option value="1" ${m.material_ready ? 'selected' : ''}>Yes</option>
+        </select>
+      </div>
+      <div class="field"><label>Ready Quantity</label><input type="number" id="em-readyqty" value="${m.material_ready_qty || 0}" min="0"></div>
+    </div>
+    <div id="em-notready" style="${m.material_ready ? 'display:none' : ''}">
+      <div class="field"><label>Order Status</label>
+        <select id="em-orderstatus">
+          <option value="TO_ORDER" ${m.order_status === 'TO_ORDER' ? 'selected' : ''}>To Order</option>
+          <option value="ORDERED" ${m.order_status === 'ORDERED' ? 'selected' : ''}>Ordered</option>
+          <option value="NA" ${m.order_status === 'NA' ? 'selected' : ''}>N/A</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Planner Note</label><textarea id="em-note">${m.planner_note || ''}</textarea></div>
+    <div class="modal-footer" style="padding:0;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditMaterial(${matId})">Save</button>
+    </div>`);
+}
+
+async function submitEditMaterial(matId) {
+  try {
+    await PUT(`/api/materials/${matId}`, {
+      material_name: document.getElementById('em-name').value,
+      material_ready: document.getElementById('em-ready').value === '1',
+      material_ready_qty: parseFloat(document.getElementById('em-readyqty').value) || 0,
+      order_status: document.getElementById('em-ready').value === '1' ? 'NA' : document.getElementById('em-orderstatus').value,
+      need_by_date: document.getElementById('em-needby').value,
+      planner_note: document.getElementById('em-note').value,
+    });
+    toast('Material updated', 'success');
+    closeModal();
+    loadMaterials();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+function addOrderLog(matId) {
+  const today = new Date().toISOString().split('T')[0];
+  openModal('Add Order Log', `
+    <div class="field-row">
+      <div class="field"><label>Ordered Qty</label><input type="number" id="ol-ordqty" min="0.01" step="0.01" placeholder="0"></div>
+      <div class="field"><label>Received Qty</label><input type="number" id="ol-recqty" value="0" min="0" step="0.01"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Order Date</label><input type="date" id="ol-odate" value="${today}"></div>
+      <div class="field"><label>Expected Date</label><input type="date" id="ol-edate"></div>
+    </div>
+    <div class="field"><label>Status</label>
+      <select id="ol-status">
+        <option value="PENDING">Pending</option>
+        <option value="PARTIAL">Partially Received</option>
+        <option value="RECEIVED">Received</option>
+      </select>
+    </div>
+    <div class="field"><label>Note</label><input id="ol-note" placeholder="PO number, supplier..."></div>
+    <div class="modal-footer" style="padding:0;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitOrderLog(${matId})">Add Log</button>
+    </div>`);
+}
+
+async function submitOrderLog(matId) {
+  try {
+    await POST(`/api/materials/${matId}/order-log`, {
+      ordered_qty: parseFloat(document.getElementById('ol-ordqty').value) || 0,
+      received_qty: parseFloat(document.getElementById('ol-recqty').value) || 0,
+      order_date: document.getElementById('ol-odate').value,
+      expected_date: document.getElementById('ol-edate').value,
+      log_status: document.getElementById('ol-status').value,
+      note: document.getElementById('ol-note').value,
+    });
+    toast('Order log added', 'success');
+    closeModal();
+    loadMaterials();
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+loadMaterials();
+</script>
+{% endblock %}

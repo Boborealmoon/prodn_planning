@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+{% block title %}Process Sheets - Production Planner{% endblock %}
+{% block page_title %}Process Sheets{% endblock %}
+{% block page_actions %}
+<button class="btn btn-ghost" onclick="refreshProcessSheets()">Refresh / Recalculate</button>
+<a class="btn btn-primary" href="/planner">Open Planner</a>
+{% endblock %}
+{% block content %}
+
+<style>
+.ps-main-id { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+.ps-sub-id { margin-top: 2px; color: var(--text3); font-size: 11px; font-weight: 600; }
+.ps-backend-id { display: none; }
+.ps-meta { color: var(--text3); font-size: 12px; line-height: 1.45; }
+.ps-chip-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.ps-click-row { cursor: pointer; }
+.ps-click-row:hover { background: rgba(26, 28, 29, 0.035); }
+.ps-click-row.is-open { background: rgba(59, 59, 59, 0.04); }
+.ps-expand-caret {
+  display: inline-flex;
+  width: 18px;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  color: var(--text3);
+  font-size: 12px;
+}
+.ps-detail-grid { display: grid; grid-template-columns: minmax(260px, 1.2fr) minmax(240px, 1fr); gap: 14px; }
+.ps-expand { display: none; }
+.ps-expand.open { display: table-row; }
+.ps-expand td { padding: 0; background: rgba(26, 28, 29, 0.02); }
+.ps-detail-grid .panel { margin-bottom: 0; box-shadow: none; }
+.ps-detail-grid .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ps-flow-edit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ps-flow-edit select { min-width: 180px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg3); font: inherit; }
+.block-actuals-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.block-actuals-toggle:hover { color: var(--accent); }
+.block-actuals-caret {
+  display: inline-flex;
+  width: 14px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+}
+.block-actuals {
+  display: none;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.block-actuals.open { display: grid; gap: 8px; }
+.block-actual-row {
+  display: grid;
+  grid-template-columns: 100px 92px 92px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg3);
+  font-size: 12px;
+}
+.block-actual-row .ps-meta { font-size: 11px; }
+@media (max-width: 980px) {
+  .dashboard-hero { align-items: flex-start; flex-direction: column; }
+  .ps-detail-grid { grid-template-columns: 1fr; }
+  .block-actual-row { grid-template-columns: 1fr; }
+}
+</style>
+
+<div class="dashboard-section">
+  <div class="dashboard-section-header">
+    <div class="dashboard-section-title">Queue Filters</div>
+  </div>
+  <div class="toolbar" style="margin-bottom:0;box-shadow:none">
+    <div class="toolbar-search">
+      <input id="ps-search" type="text" placeholder="Search process sheet, partial, part, route..." oninput="debouncedLoadProcessSheets()">
+    </div>
+    <select id="ps-status" onchange="loadProcessSheets()">
+      <option value="">All status</option>
+      <option value="ACTIVE">Active</option>
+      <option value="COMPLETED">Completed</option>
+      <option value="ON_HOLD">On hold</option>
+    </select>
+    <select id="ps-planner-status" onchange="loadProcessSheets()">
+      <option value="">All planner status</option>
+      <option value="UNPLANNED">Unplanned</option>
+      <option value="PARTIALLY_PLANNED">Partially planned</option>
+      <option value="PLANNED">Planned</option>
+      <option value="NEEDS_REVIEW">Needs review</option>
+      <option value="COMPLETED">Completed</option>
+    </select>
+    <label class="toggle-label"><input id="ps-overdue" type="checkbox" onchange="loadProcessSheets()"> Overdue only</label>
+    <label class="toggle-label"><input id="ps-completed" type="checkbox" onchange="loadProcessSheets()"> Show completed</label>
+  </div>
+</div>
+
+<div class="stats-row">
+  <div class="stat-box"><div class="stat-label">Visible</div><div class="stat-value" id="stat-total">-</div></div>
+  <div class="stat-box"><div class="stat-label">Unplanned</div><div class="stat-value" id="stat-unplanned" style="color:var(--text3)">-</div></div>
+  <div class="stat-box"><div class="stat-label">Partially Planned</div><div class="stat-value" id="stat-partial" style="color:var(--yellow)">-</div></div>
+  <div class="stat-box"><div class="stat-label">Planned</div><div class="stat-value" id="stat-planned" style="color:var(--accent)">-</div></div>
+  <div class="stat-box"><div class="stat-label">Material Watch</div><div class="stat-value" id="stat-material" style="color:var(--orange)">-</div></div>
+  <div class="stat-box"><div class="stat-label">Overdue</div><div class="stat-value" id="stat-overdue" style="color:var(--red)">-</div></div>
+</div>
+
+<div class="dashboard-section">
+  <div class="dashboard-section-header">
+    <div class="dashboard-section-title">Production Queue</div>
+    <div class="dashboard-note">Expand a row for BOM/flow, route steps, planned blocks and materials. Block actuals live inside each planned block.</div>
+  </div>
+  <div class="table-wrap" id="ps-table-wrap">
+    <div class="loading"><div class="spinner"></div> Loading...</div>
+  </div>
+</div>
+
+<script>
+let processSheets = [];
+let expandedRows = new Set();
+let loadTimer = null;
+
+function debouncedLoadProcessSheets() {
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(loadProcessSheets, 250);
+}
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function psDomId(value) {
+  return encodeURIComponent(String(value ?? '')).replace(/%/g, '_');
+}
+
+function num(value, digits = 0) {
+  const n = Number(value || 0);
+  return n.toLocaleString(undefined, {maximumFractionDigits: digits});
+}
+
+function dt(value) {
+  const text = String(value || '');
+  return text ? text.replace('T', ' ').slice(0, 16) : '-';
+}
+
+function displayPsId(ps) {
+  return ps.display_ps_id || ps.source_ps_id || String(ps.ps_id || '').split('::')[0] || '';
+}
+
+function partialText(ps) {
+  const partial = ps.pp_partial_no || (String(ps.ps_id || '').includes('::') ? String(ps.ps_id).split('::').pop() : '');
+  return partial ? `Partial ${partial}` : '';
+}
+
+async function apiJSON(url, options = {}) {
+  const resp = await fetch(url, {
+    headers: {'Content-Type': 'application/json'},
+    ...options,
+  });
+  const text = await resp.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {error: text}; }
+  if (!resp.ok) throw new Error(data.error || `Request failed: ${resp.status}`);
+  return data;
+}
+
+function filterParams() {
+  const params = new URLSearchParams();
+  params.set('search', document.getElementById('ps-search').value || '');
+  params.set('status', document.getElementById('ps-status').value || '');
+  params.set('planner_status', document.getElementById('ps-planner-status').value || '');
+  params.set('overdue_only', document.getElementById('ps-overdue').checked ? '1' : '0');
+  params.set('show_completed', document.getElementById('ps-completed').checked ? '1' : '0');
+  return params;
+}
+
+async function refreshProcessSheets() {
+  const wrap = document.getElementById('ps-table-wrap');
+  wrap.innerHTML = `<div class="loading"><div class="spinner"></div> Recalculating...</div>`;
+  await apiJSON('/api/trial/recalc', {method: 'POST', body: '{}'});
+  await loadProcessSheets();
+}
+
+async function loadProcessSheets() {
+  const wrap = document.getElementById('ps-table-wrap');
+  wrap.innerHTML = `<div class="loading"><div class="spinner"></div> Loading...</div>`;
+  try {
+    processSheets = await apiJSON('/api/trial/process-sheets?' + filterParams().toString());
+    updateStats();
+    renderProcessSheets();
+  } catch (err) {
+    wrap.innerHTML = `<div class="loading" style="color:var(--red)">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+function updateStats() {
+  document.getElementById('stat-total').textContent = processSheets.length;
+  document.getElementById('stat-unplanned').textContent = processSheets.filter(ps => ps.planner_status === 'UNPLANNED').length;
+  document.getElementById('stat-partial').textContent = processSheets.filter(ps => ps.planner_status === 'PARTIALLY_PLANNED').length;
+  document.getElementById('stat-planned').textContent = processSheets.filter(ps => ['PLANNED', 'COMPLETED'].includes(ps.planner_status)).length;
+  document.getElementById('stat-material').textContent = processSheets.filter(ps => ['late', 'warning', 'pending'].includes(ps.material_status?.severity)).length;
+  document.getElementById('stat-overdue').textContent = processSheets.filter(ps => (ps.warnings || []).includes('OVERDUE')).length;
+}
+
+function statusBadge(status) {
+  const clean = String(status || 'UNPLANNED').toUpperCase();
+  if (clean === 'COMPLETED') return '<span class="badge badge-green">Completed</span>';
+  if (clean === 'PLANNED') return '<span class="badge badge-blue">Planned</span>';
+  if (clean === 'PARTIALLY_PLANNED') return '<span class="badge badge-yellow">Partial</span>';
+  if (clean === 'NEEDS_REVIEW') return '<span class="badge badge-orange">Review</span>';
+  return '<span class="badge badge-gray">Unplanned</span>';
+}
+
+function materialBadge(material) {
+  const severity = material?.severity || 'pending';
+  const label = material?.label || (material?.status === 'READY' ? 'Material ready' : 'Material pending');
+  if (severity === 'none') return `<span class="badge badge-green">${esc(label || 'Ready')}</span>`;
+  if (severity === 'late') return `<span class="badge badge-red">${esc(label)}</span>`;
+  if (severity === 'warning') return `<span class="badge badge-yellow">${esc(label)}</span>`;
+  return `<span class="badge badge-gray">${esc(label)}</span>`;
+}
+
+function warningBadges(ps) {
+  const warnings = ps.warnings || [];
+  if (!warnings.length) return '<span class="badge badge-green">OK</span>';
+  return warnings.map(w => {
+    const cls = w === 'OVERDUE' ? 'badge-red' : 'badge-yellow';
+    return `<span class="badge ${cls}">${esc(w.replaceAll('_', ' '))}</span>`;
+  }).join('');
+}
+
+function progressMeta(ps) {
+  return `
+    <div><strong>${num(ps.finished_qty)}</strong> output / <strong>${num(ps.reject_qty)}</strong> reject</div>
+    <div class="ps-meta"><strong>${num(ps.remaining_qty)}</strong> remaining</div>
+  `;
+}
+
+function renderProcessSheets() {
+  const wrap = document.getElementById('ps-table-wrap');
+  if (!processSheets.length) {
+    wrap.innerHTML = '<div class="empty-state"><div class="icon">PS</div><p>No process sheets found.</p></div>';
+    return;
+  }
+  const rows = processSheets.map(ps => {
+    const key = psDomId(ps.ps_id);
+    const psArg = JSON.stringify(ps.ps_id);
+    const isOpen = expandedRows.has(ps.ps_id);
+    return `
+    <tr class="ps-click-row ${isOpen ? 'is-open' : ''}" onclick='toggleDetails(${psArg})' tabindex="0" role="button" onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); toggleDetails(${psArg}); }">
+      <td>
+        <div class="ps-main-id">${esc(displayPsId(ps))}</div>
+        <div class="ps-sub-id">${esc(partialText(ps))}</div>
+      </td>
+      <td>
+        <strong>${esc(ps.part_no || '-')}</strong>
+        <div class="ps-meta">${esc(ps.part_desc || '')}</div>
+        <div class="ps-meta">${esc(ps.route_label || '-')}</div>
+      </td>
+      <td>
+        <strong>${esc(ps.due_date || '-')}</strong>
+        <div class="ps-meta">Order ${esc(ps.order_date || '-')}</div>
+      </td>
+      <td style="text-align:right">
+        <strong>${num(ps.total_qty)}</strong>
+      </td>
+      <td>${progressMeta(ps)}</td>
+      <td>
+        <div>${dt(ps.expected_start)}</div>
+        <div class="ps-meta">to ${dt(ps.expected_end)}</div>
+      </td>
+      <td><div class="ps-chip-row">${statusBadge(ps.planner_status)}${materialBadge(ps.material_status)}</div></td>
+      <td><div class="badges-wrap">${warningBadges(ps)}</div></td>
+    </tr>
+    <tr id="detail-row-${key}" class="ps-expand ${isOpen ? 'open' : ''}"><td colspan="8"><div class="expand-content open" id="detail-${key}"></div></td></tr>
+  `}).join('');
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Process Sheet</th>
+          <th>Part</th>
+          <th>Due Date</th>
+          <th style="text-align:right">Qty</th>
+          <th>Progress</th>
+          <th>Expected Run Time</th>
+          <th>Status</th>
+          <th>Warnings</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+async function toggleDetails(psId, focusFlow = false) {
+  const key = psDomId(psId);
+  const row = document.getElementById(`detail-row-${key}`);
+  const target = document.getElementById(`detail-${key}`);
+  if (!row || !target) return;
+  if (row.classList.contains('open') && !focusFlow) {
+    row.classList.remove('open');
+    expandedRows.delete(psId);
+    renderProcessSheets();
+    return;
+  }
+  row.classList.add('open');
+  expandedRows.add(psId);
+  target.innerHTML = `<div class="loading"><div class="spinner"></div> Loading details...</div>`;
+  try {
+    const details = await apiJSON(`/api/trial/process-sheets/${encodeURIComponent(psId)}/details`);
+    target.innerHTML = renderDetails(details);
+    if (focusFlow) {
+      const flow = target.querySelector('.ps-flow-edit');
+      if (flow) flow.scrollIntoView({block: 'nearest'});
+    }
+  } catch (err) {
+    target.innerHTML = `<div style="color:var(--red)">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+function toggleBlockActuals(blockId) {
+  const key = psDomId(blockId);
+  const actuals = document.getElementById(`block-actuals-${key}`);
+  const caret = document.getElementById(`block-actuals-caret-${key}`);
+  if (!actuals) return;
+  actuals.classList.toggle('open');
+  if (caret) caret.textContent = actuals.classList.contains('open') ? '▴' : '▾';
+}
+
+function renderDetails(ps) {
+  const key = psDomId(ps.ps_id);
+  const psArg = JSON.stringify(ps.ps_id);
+  const flowOptions = (ps.flow_options || []).map(flow => `
+    <option value="${flow.bom_id}" ${Number(flow.bom_id) === Number(ps.selected_bom_id) ? 'selected' : ''}>${esc(flow.flow_code || flow.flow_name || flow.bom_id)}</option>
+  `).join('');
+  const steps = (ps.flow_steps || []).map(step => `
+    <div class="block-card">
+      <div class="block-header">
+        <strong>${esc(step.op_no || step.seq_no)}</strong>
+        <span class="badge badge-gray">${esc(step.machine_category || step.preferred_machine || 'Machine TBD')}</span>
+        ${step.is_last_op ? '<span class="badge badge-blue">Last Op</span>' : ''}
+      </div>
+      <div class="block-rows-table">
+        <strong>${esc(step.op_type || '-')}</strong>
+        <div class="ps-meta">Planned ${num(step.planned_qty)} | Output ${num(step.finished_qty)} | Reject ${num(step.reject_qty)}</div>
+        <div class="ps-meta">${dt(step.expected_start)} to ${dt(step.expected_end)}</div>
+      </div>
+    </div>
+  `).join('') || '<div class="empty-state" style="padding:18px"><p>No selected flow steps.</p></div>';
+  const blocks = (ps.planned_blocks || []).map(block => {
+    const actualCount = Number(block.actual_report_count || (block.actuals || []).length || 0);
+    const actualRows = (block.actuals || []).map(row => `
+      <div class="block-actual-row" onclick="event.stopPropagation()">
+        <div><strong>${esc(row.report_date || '-')}</strong><div class="ps-meta">${esc(row.reported_at || '')}</div></div>
+        <div><strong>Target ${num(row.target_qty_at_report)}</strong></div>
+        <div><strong>Output ${num(row.output_qty)}</strong></div>
+        <div><strong>Reject ${num(row.reject_qty)}</strong></div>
+      </div>
+    `).join('') || '<div class="empty-state" style="padding:12px 0"><p>No actuals reported.</p></div>';
+    return `
+    <div class="block-card">
+      <div class="block-header">
+        <strong>${esc(block.source_op_no || block.operation_id)}</strong>
+        <span class="badge badge-gray">${esc(block.machine_code || 'Machine TBD')}</span>
+        <span class="badge badge-blue">${num(block.scheduled_qty)} qty</span>
+        ${statusBadge(block.planning_status || block.status)}
+      </div>
+      <div class="block-rows-table">
+        <div class="ps-meta">${dt(block.expected_start || block.calculated_start_datetime)} to ${dt(block.expected_end || block.calculated_end_datetime)}</div>
+        <div class="ps-meta">Output ${num(block.output_qty)} | Reject ${num(block.reject_qty)}</div>
+        <button class="block-actuals-toggle" onclick="event.stopPropagation(); toggleBlockActuals(${Number(block.block_id || 0)})">
+          <span class="block-actuals-caret" id="block-actuals-caret-${psDomId(block.block_id)}">▾</span>
+          Actuals: ${actualCount} reports
+        </button>
+      </div>
+      <div class="block-actuals" id="block-actuals-${psDomId(block.block_id)}" onclick="event.stopPropagation()">
+        ${actualRows}
+      </div>
+    </div>
+  `;}).join('') || '<div class="empty-state" style="padding:18px"><p>No planned blocks yet.</p></div>';
+  const materials = (ps.material_requirements || []).map(req => `
+    <div class="block-card">
+      <div class="block-header">
+        <strong>${esc(req.material_inventory_code || '-')}</strong>
+        <span class="badge badge-gray">${esc(req.supply_status || 'Pending')}</span>
+      </div>
+      <div class="block-rows-table">
+        <div>${esc(req.material_description || '')}</div>
+        <div class="ps-meta">Ready date ${esc(req.expected_ready_date || '-')}</div>
+      </div>
+    </div>
+  `).join('') || '<div class="empty-state" style="padding:18px"><p>No material requirements.</p></div>';
+  return `
+    <div class="ps-detail-grid">
+      <div class="panel">
+        <div class="panel-title">BOM / Flow</div>
+        <div class="ps-flow-edit">
+          <select id="flow-select-${key}" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()" onchange="event.stopPropagation()">${flowOptions || '<option value="">No flows</option>'}</select>
+          <button class="btn btn-sm btn-primary" onclick='event.stopPropagation(); saveSelectedFlow(${psArg})'>Save Flow</button>
+          <a class="btn btn-sm btn-ghost" href="/planner?ps=${encodeURIComponent(ps.ps_id)}" onclick="event.stopPropagation()">Open Planner</a>
+        </div>
+        <div class="ps-meta" style="margin-top:10px">${esc(ps.part_no || '')} ${ps.part_desc ? '· ' + esc(ps.part_desc) : ''}</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Materials</div>
+        ${materials}
+      </div>
+      <div class="panel">
+        <div class="panel-title">Route Steps</div>
+        ${steps}
+      </div>
+      <div class="panel">
+        <div class="panel-title">Planned Blocks</div>
+        ${blocks}
+      </div>
+    </div>
+  `;
+}
+
+async function saveSelectedFlow(psId) {
+  const select = document.getElementById(`flow-select-${psDomId(psId)}`);
+  if (!select || !select.value) return;
+  await apiJSON(`/api/trial/process-sheets/${encodeURIComponent(psId)}/flow`, {
+    method: 'PUT',
+    body: JSON.stringify({bom_id: Number(select.value)}),
+  });
+  await refreshProcessSheets();
+  await toggleDetails(psId, true);
+}
+
+document.addEventListener('DOMContentLoaded', loadProcessSheets);
+</script>
+
+{% endblock %}
