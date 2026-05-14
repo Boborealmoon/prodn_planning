@@ -79,6 +79,23 @@ def api_trial_gantt():
         calendar = _calendar_rows(con, start_iso, end_iso, machines)
         dates = [row["work_date"] for row in calendar]
         off_time_blocks = gantt_off_time_blocks(machines, dates, con)
+        calendar_windows = [dict(row) for row in rows(
+            con.execute(
+                """
+                SELECT w.*, m.machine_code
+                FROM machine_calendar_window w
+                LEFT JOIN machines m ON m.machine_id = w.machine_id
+                WHERE w.active = 1
+                  AND w.start_at < ?
+                  AND w.end_at > ?
+                ORDER BY w.start_at, w.window_id
+                """,
+                (f"{end_iso} 23:59:59", f"{start_iso} 00:00:00"),
+            )
+        )]
+        for window in calendar_windows:
+            window_type = compact_text(window.get("window_type") or "").upper()
+            window["display_kind"] = "available" if window_type in {"OVERTIME", "AVAILABLE"} else "blocked"
         break_windows = [
             {
                 "work_date": work_date,
@@ -97,8 +114,10 @@ def api_trial_gantt():
                         block_id,
                         COALESCE(SUM(COALESCE(output_qty, 0)), 0) AS output_qty,
                         COALESCE(SUM(COALESCE(reject_qty, 0)), 0) AS reject_qty,
+                        COALESCE(SUM(COALESCE(output_qty, 0) - COALESCE(reject_qty, 0)), 0) AS good_qty,
                         COUNT(actual_id) AS actual_report_count
                     FROM production_actual
+                    WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
                     GROUP BY block_id
                 )
                 SELECT
@@ -120,12 +139,13 @@ def api_trial_gantt():
                     b.scheduled_qty,
                     COALESCE(ab.output_qty, 0) AS output_qty,
                     COALESCE(ab.reject_qty, 0) AS reject_qty,
+                    COALESCE(ab.good_qty, 0) AS good_qty,
                     COALESCE(ab.actual_report_count, 0) AS actual_report_count,
                     b.status,
                     b.planning_status,
                     b.execution_status,
                     ps.total_qty AS ps_total_qty,
-                    ps.finished_qty AS ps_finished_qty,
+                    COALESCE(ab.good_qty, 0) AS ps_finished_qty,
                     ps.status AS ps_status,
                     ps.planner_status AS ps_planner_status,
                     pfs.is_last_op AS is_last_op,
@@ -151,6 +171,7 @@ def api_trial_gantt():
                 LEFT JOIN run_block_group g ON g.group_id = b.group_id
                 LEFT JOIN actual_by_block ab ON ab.block_id = b.block_id
                 WHERE s.segment_date BETWEEN ? AND ?
+                  AND COALESCE(b.active, 1) = 1
                   AND (? = 1 OR COALESCE(b.status, '') <> 'COMPLETED')
                 ORDER BY s.segment_date, b.machine_id, s.start_datetime, s.segment_id
                 """,
@@ -162,24 +183,27 @@ def api_trial_gantt():
             int(row["segment_id"]): {
                 "output_qty": float(row["output_qty"] or 0),
                 "reject_qty": float(row["reject_qty"] or 0),
+                "good_qty": float(row["good_qty"] or 0),
                 "actual_report_count": int(row["actual_report_count"] or 0),
                 "target_qty_at_report": float(row["target_qty_at_report"] or 0),
             }
             for row in rows(
                 con.execute(
-                    """
-                    SELECT
-                        segment_id,
-                        COALESCE(SUM(COALESCE(output_qty, 0)), 0) AS output_qty,
-                        COALESCE(SUM(COALESCE(reject_qty, 0)), 0) AS reject_qty,
-                        COUNT(actual_id) AS actual_report_count,
-                        MAX(COALESCE(target_qty_at_report, 0)) AS target_qty_at_report
-                    FROM production_actual
-                    WHERE segment_id IS NOT NULL
-                    GROUP BY segment_id
-                    """,
-                )
+                """
+                SELECT
+                    segment_id,
+                    COALESCE(SUM(COALESCE(output_qty, 0)), 0) AS output_qty,
+                    COALESCE(SUM(COALESCE(reject_qty, 0)), 0) AS reject_qty,
+                    COALESCE(SUM(COALESCE(output_qty, 0) - COALESCE(reject_qty, 0)), 0) AS good_qty,
+                    COUNT(actual_id) AS actual_report_count,
+                    MAX(COALESCE(target_qty_at_report, 0)) AS target_qty_at_report
+                FROM production_actual
+                WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                GROUP BY segment_id
+                """,
             )
+        )
         }
 
         blocks_by_block_id = {}
@@ -225,14 +249,15 @@ def api_trial_gantt():
             item["scheduled_qty"] = float(item.get("scheduled_qty") or 0)
             item["output_qty"] = float(item.get("output_qty") or 0)
             item["reject_qty"] = float(item.get("reject_qty") or 0)
+            item["good_qty"] = float(item.get("good_qty") or max(0.0, item["output_qty"] - item["reject_qty"]))
             item["actual_report_count"] = int(item.get("actual_report_count") or 0)
-            item["op_output_qty"] = float(item.get("output_qty") or 0)
+            item["op_output_qty"] = float(item.get("good_qty") or 0)
             item["op_scheduled_qty"] = float(item.get("scheduled_qty") or 0)
             item["ps_total_qty"] = float(item.get("ps_total_qty") or 0)
             item["ps_finished_qty"] = float(item.get("ps_finished_qty") or 0)
             item["ps_status"] = compact_text(item.get("ps_status") or "")
             item["ps_planner_status"] = compact_text(item.get("ps_planner_status") or "")
-            item["segment_output_qty"] = float(actual_by_segment.get(int(item.get("segment_id") or 0), {}).get("output_qty", 0))
+            item["segment_output_qty"] = float(actual_by_segment.get(int(item.get("segment_id") or 0), {}).get("good_qty", 0))
             item["segment_reject_qty"] = float(actual_by_segment.get(int(item.get("segment_id") or 0), {}).get("reject_qty", 0))
             item["segment_actual_report_count"] = int(actual_by_segment.get(int(item.get("segment_id") or 0), {}).get("actual_report_count", 0))
             item["segment_target_qty_at_report"] = float(actual_by_segment.get(int(item.get("segment_id") or 0), {}).get("target_qty_at_report", 0))
@@ -334,6 +359,7 @@ def api_trial_gantt():
                 "calendar": calendar,
                 "break_windows": break_windows,
                 "off_time_blocks": off_time_blocks,
+                "calendar_windows": calendar_windows,
                 "blocks": payload_blocks,
             }
         )

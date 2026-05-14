@@ -4,17 +4,23 @@ from datetime import date, datetime, timedelta
 
 from .constants import TRIAL_MACHINES
 from .db import one, rows
+from .scheduler_state import active_calendar_windows_for_machine_day
 from .utils import compact_text
 
 
 STANDARD_WORK_START_MINUTE = 8 * 60 + 30
-STANDARD_WORK_END_MINUTE = 16 * 60 + 30
+STANDARD_WORK_END_MINUTE = 20 * 60
 SATURDAY_WORK_END_MINUTE = 16 * 60 + 15
 WEEKDAY_LUNCH_START_MINUTE = 12 * 60
 WEEKDAY_LUNCH_END_MINUTE = 12 * 60 + 45
 WEEKDAY_COFFEE_START_MINUTE = 16 * 60
 WEEKDAY_COFFEE_END_MINUTE = 16 * 60 + 15
 DAY_END_MINUTE = 24 * 60
+BLOCKING_WINDOW_TYPES = {"DOWN", "MAINTENANCE", "HOLIDAY", "BLOCKED"}
+ADDING_WINDOW_TYPES = {"OVERTIME", "AVAILABLE"}
+
+# Calendar windows are capacity overlays, not queue work:
+# blocking windows subtract usable time, while overtime/available windows add it back.
 
 
 def default_profile_for_weekday(weekday, shift_profile="STANDARD"):
@@ -128,13 +134,105 @@ def is_public_holiday(con, work_date):
 
 def capacity_minutes_for_machine_day(con, machine_id, work_date):
     cap = machine_capacity_for_date(con, machine_id, work_date)
+    intervals = machine_work_intervals_for_day(con, machine_id, work_date)
     return {
         "profile_name": cap["profile_name"],
-        "capacity_minutes": int(cap["capacity_minutes"] or 0),
+        "capacity_minutes": int(round(_intervals_to_minutes(intervals))),
         "start_minute": int(cap["start_minute"] or 0),
         "note": cap.get("note", ""),
         "has_capacity_day_override": bool(cap.get("has_capacity_day_override")),
     }
+
+
+def _minute_to_datetime(work_day, minute):
+    minute_value = max(0, min(DAY_END_MINUTE, int(round(float(minute or 0)))))
+    return datetime.combine(work_day, datetime.min.time()) + timedelta(minutes=minute_value)
+
+
+def _intervals_to_minutes(intervals):
+    total = 0.0
+    for start_dt, end_dt in intervals:
+        if start_dt and end_dt and end_dt > start_dt:
+            total += (end_dt - start_dt).total_seconds() / 60.0
+    return total
+
+
+def _merge_intervals(intervals):
+    cleaned = sorted([(start, end) for start, end in intervals if start and end and end > start], key=lambda item: item[0])
+    if not cleaned:
+        return []
+    merged = [cleaned[0]]
+    for start, end in cleaned[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _subtract_interval(base_intervals, cut_start, cut_end):
+    if not cut_start or not cut_end or cut_end <= cut_start:
+        return list(base_intervals)
+    result = []
+    for start, end in base_intervals:
+        if end <= cut_start or start >= cut_end:
+            result.append((start, end))
+            continue
+        if start < cut_start:
+            result.append((start, min(cut_start, end)))
+        if end > cut_end:
+            result.append((max(cut_end, start), end))
+    return _merge_intervals(result)
+
+
+def _add_interval(base_intervals, add_start, add_end):
+    if not add_start or not add_end or add_end <= add_start:
+        return list(base_intervals)
+    return _merge_intervals([*base_intervals, (add_start, add_end)])
+
+
+def machine_work_intervals_for_day(con, machine_id, work_date):
+    work_day = work_date if isinstance(work_date, date) else date.fromisoformat(str(work_date))
+    machine = one(con.execute("SELECT machine_id, shift_profile FROM machines WHERE machine_id = ?", (int(machine_id),))) if machine_id else None
+    machine_shift_profile = compact_text(machine["shift_profile"]) if machine else ""
+    cap = machine_capacity_details_for_date(con, machine_id, work_day)
+    base_intervals = []
+    if cap and int(cap.get("capacity_minutes") or 0) > 0:
+        start_minute = int(cap.get("start_minute") or 0)
+        end_minute = min(DAY_END_MINUTE, start_minute + int(cap.get("capacity_minutes") or 0))
+        base_intervals = [(_minute_to_datetime(work_day, start_minute), _minute_to_datetime(work_day, end_minute))]
+    elif work_day.weekday() == 6 or is_public_holiday(con, work_day):
+        base_intervals = []
+    elif machine_shift_profile.upper() == "24HR":
+        base_intervals = [(_minute_to_datetime(work_day, 0), _minute_to_datetime(work_day, DAY_END_MINUTE))]
+    elif work_day.weekday() == 5:
+        base_intervals = [
+            (_minute_to_datetime(work_day, STANDARD_WORK_START_MINUTE), _minute_to_datetime(work_day, WEEKDAY_LUNCH_START_MINUTE)),
+            (_minute_to_datetime(work_day, WEEKDAY_LUNCH_END_MINUTE), _minute_to_datetime(work_day, SATURDAY_WORK_END_MINUTE)),
+        ]
+    else:
+        base_intervals = [
+            (_minute_to_datetime(work_day, STANDARD_WORK_START_MINUTE), _minute_to_datetime(work_day, WEEKDAY_LUNCH_START_MINUTE)),
+            (_minute_to_datetime(work_day, WEEKDAY_LUNCH_END_MINUTE), _minute_to_datetime(work_day, WEEKDAY_COFFEE_START_MINUTE)),
+            (_minute_to_datetime(work_day, WEEKDAY_COFFEE_END_MINUTE), _minute_to_datetime(work_day, STANDARD_WORK_END_MINUTE)),
+        ]
+
+    calendar_windows = list(active_calendar_windows_for_machine_day(con, machine_id, work_day)) if con and machine_id else []
+    for window in calendar_windows:
+        window_type = compact_text(window["window_type"]).upper()
+        start_dt = datetime.fromisoformat(str(window["start_at"]).replace("T", " "))
+        end_dt = datetime.fromisoformat(str(window["end_at"]).replace("T", " "))
+        if window_type in BLOCKING_WINDOW_TYPES:
+            base_intervals = _subtract_interval(base_intervals, start_dt, end_dt)
+        elif window_type in ADDING_WINDOW_TYPES:
+            base_intervals = _add_interval(base_intervals, start_dt, end_dt)
+
+    return _merge_intervals(base_intervals)
+
+
+def machine_work_minutes_for_day(con, machine_id, work_date):
+    return _intervals_to_minutes(machine_work_intervals_for_day(con, machine_id, work_date))
 
 
 def shift_windows_for_machine_day(machine, date_iso, con=None):

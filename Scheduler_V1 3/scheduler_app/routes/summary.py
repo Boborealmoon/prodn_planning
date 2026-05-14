@@ -171,6 +171,7 @@ def api_trial_summary():
             int(row["block_id"]): {
                 "output_qty": float(row["output_qty"] or 0),
                 "reject_qty": float(row["reject_qty"] or 0),
+                "good_qty": float(row["good_qty"] or 0),
                 "actual_report_count": int(row["actual_report_count"] or 0),
             }
             for row in rows(
@@ -179,9 +180,11 @@ def api_trial_summary():
                     SELECT block_id,
                            COALESCE(SUM(COALESCE(output_qty, 0)), 0) AS output_qty,
                            COALESCE(SUM(COALESCE(reject_qty, 0)), 0) AS reject_qty,
+                           COALESCE(SUM(COALESCE(output_qty, 0) - COALESCE(reject_qty, 0)), 0) AS good_qty,
                            COUNT(actual_id) AS actual_report_count
                     FROM production_actual
-                    WHERE report_date BETWEEN ? AND ?
+                    WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                      AND report_date BETWEEN ? AND ?
                     GROUP BY block_id
                     """,
                     (start_d.isoformat(), end_d.isoformat()),
@@ -230,7 +233,6 @@ def api_trial_summary():
                     ps.source_ps_id AS display_source_ps_id,
                     ps.pp_partial_no AS display_partial_no,
                     ps.total_qty AS ps_total_qty,
-                    ps.finished_qty AS ps_finished_qty,
                     ps.status AS ps_status,
                     ps.planner_status AS ps_planner_status,
                     ps.due_date AS ps_due_date,
@@ -238,6 +240,7 @@ def api_trial_summary():
                     g.group_label,
                     COALESCE(ab.output_qty, 0) AS output_qty,
                     COALESCE(ab.reject_qty, 0) AS reject_qty,
+                    COALESCE(ab.good_qty, 0) AS ps_finished_qty,
                     COALESCE(ab.actual_report_count, 0) AS actual_report_count
                 FROM run_block_segment s
                 JOIN run_block b ON b.block_id = s.block_id
@@ -250,13 +253,16 @@ def api_trial_summary():
                     SELECT block_id,
                            COALESCE(SUM(COALESCE(output_qty, 0)), 0) AS output_qty,
                            COALESCE(SUM(COALESCE(reject_qty, 0)), 0) AS reject_qty,
+                           COALESCE(SUM(COALESCE(output_qty, 0) - COALESCE(reject_qty, 0)), 0) AS good_qty,
                            COUNT(actual_id) AS actual_report_count
                     FROM production_actual
-                    WHERE report_date BETWEEN ? AND ?
+                    WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                      AND report_date BETWEEN ? AND ?
                     GROUP BY block_id
                 ) ab ON ab.block_id = b.block_id
                 WHERE s.segment_date BETWEEN ? AND ?
                   AND b.machine_id IN ({q_marks})
+                  AND COALESCE(b.active, 1) = 1
                 ORDER BY b.machine_id, s.segment_date, s.start_datetime, s.segment_id
                 """,
                 (start_d.isoformat(), end_d.isoformat(), start_d.isoformat(), end_d.isoformat(), *machine_ids),
@@ -455,11 +461,15 @@ def api_trial_summary():
 
             for detail in details:
                 actual = actual_by_block.get(int(detail["block_id"]), {"output_qty": 0.0, "reject_qty": 0.0, "actual_report_count": 0})
-                detail["actual_qty_out"] = float(actual.get("output_qty") or 0)
-                detail["output_qty"] = detail["actual_qty_out"]
-                detail["reject_qty"] = float(actual.get("reject_qty") or 0)
+                raw_output_qty = float(actual.get("output_qty") or 0)
+                reject_qty = float(actual.get("reject_qty") or 0)
+                good_qty = float(actual.get("good_qty") or max(0.0, raw_output_qty - reject_qty))
+                detail["actual_qty_out"] = good_qty
+                detail["good_qty"] = good_qty
+                detail["output_qty"] = raw_output_qty
+                detail["reject_qty"] = reject_qty
                 detail["actual_report_count"] = int(actual.get("actual_report_count") or 0)
-                detail["op_actual_units"] = float(detail["actual_qty_out"] or 0) + float(detail["reject_qty"] or 0)
+                detail["op_actual_units"] = raw_output_qty
                 cycle_time = float(detail.get("seq_cycle_time") or detail.get("op_cycle_minutes_per_qty") or 0)
                 setup_time = float(detail.get("seq_setup_time") or detail.get("op_setup_minutes") or 0)
                 detail["actual_used_minutes"] = (setup_time + (cycle_time * detail["op_actual_units"])) if detail["actual_report_count"] > 0 else 0.0
@@ -467,11 +477,11 @@ def api_trial_summary():
                 detail["effective_hours"] = detail["actual_used_hours"]
                 planned_qty = float(detail.get("planned_qty") or 0)
                 total_qty = float(detail.get("total_qty") or 0)
-                actual_qty = float(detail.get("actual_qty_out") or 0)
+                actual_qty = good_qty
                 detail["schedule_completion_pct"] = min(100.0, (actual_qty / planned_qty * 100.0) if planned_qty else 0.0)
                 detail["order_completion_pct"] = min(100.0, (actual_qty / total_qty * 100.0) if total_qty else 0.0)
                 op_scheduled_qty = float(detail.get("op_scheduled_qty") or planned_qty or 0)
-                op_output_qty = float(detail.get("op_output_qty") or actual_qty or 0)
+                op_output_qty = good_qty
                 detail["op_scheduled_qty"] = op_scheduled_qty
                 detail["op_output_qty"] = op_output_qty
                 detail["op_finished"] = bool(
@@ -691,8 +701,8 @@ def api_trial_summary():
         missing_actuals = [detail for detail in all_details if compact_text(detail.get("plan_date") or "") < date.today().isoformat() and not detail.get("op_finished") and int(detail.get("actual_report_count") or 0) == 0]
         cycle_time_high_variance = [detail for detail in all_details if float(detail.get("actual_used_hours") or 0) > float(detail.get("planned_hours") or 0) * 1.25 and int(detail.get("actual_report_count") or 0) > 0]
         cycle_time_low_variance = [detail for detail in all_details if float(detail.get("actual_used_hours") or 0) < float(detail.get("planned_hours") or 0) * 0.70 and int(detail.get("actual_report_count") or 0) > 0]
-        output_over_scheduled = [detail for detail in all_details if float(detail.get("output_qty") or 0) > float(detail.get("op_scheduled_qty") or 0) * 1.10]
-        output_under_scheduled = [detail for detail in all_details if bool(detail.get("op_finished")) and float(detail.get("output_qty") or 0) < float(detail.get("op_scheduled_qty") or 0) * 0.90]
+        output_over_scheduled = [detail for detail in all_details if float(detail.get("actual_qty_out") or 0) > float(detail.get("op_scheduled_qty") or 0) * 1.10]
+        output_under_scheduled = [detail for detail in all_details if bool(detail.get("op_finished")) and float(detail.get("actual_qty_out") or 0) < float(detail.get("op_scheduled_qty") or 0) * 0.90]
         missing_cycle_time = [detail for detail in all_details if float(detail.get("seq_cycle_time") or detail.get("op_cycle_minutes_per_qty") or 0) <= 0]
         missing_setup_time = [detail for detail in all_details if float(detail.get("seq_setup_time") or detail.get("op_setup_minutes") or 0) <= 0]
         at_risk_ps_count = len([ps for ps in ps_entries if ps.get("risk_label") in {"Late", "Due soon", "Not fully planned"}])
@@ -709,7 +719,7 @@ def api_trial_summary():
                     ps.source_ps_id AS display_source_ps_id,
                     ps.pp_partial_no AS display_partial_no,
                     ps.total_qty AS ps_total_qty,
-                    ps.finished_qty AS ps_finished_qty,
+                    COALESCE(ab.good_qty, 0) AS ps_finished_qty,
                     ps.status AS ps_status,
                     ps.planner_status AS ps_planner_status,
                     ps.due_date AS ps_due_date,
@@ -750,7 +760,9 @@ def api_trial_summary():
                 LEFT JOIN machines m ON m.machine_id = b.machine_id
                 LEFT JOIN run_block_segment s ON s.block_id = b.block_id
                 LEFT JOIN production_actual a ON a.block_id = b.block_id
+                 AND COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
                 WHERE b.machine_id IN ({q_marks})
+                  AND COALESCE(b.active, 1) = 1
                   AND (
                     EXISTS (
                       SELECT 1
@@ -762,6 +774,7 @@ def api_trial_summary():
                       SELECT 1
                       FROM production_actual ax
                       WHERE ax.block_id = b.block_id
+                        AND COALESCE(ax.status, 'ACTIVE') = 'ACTIVE'
                         AND ax.report_date BETWEEN ? AND ?
                     )
                     OR (

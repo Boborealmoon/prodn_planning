@@ -238,6 +238,40 @@
     cursor: default;
     z-index: 1;
   }
+  #gantt-container .gantt-calendar-window-band {
+    position: absolute;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.9;
+  }
+  #gantt-container .gantt-calendar-window-blocked {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(239,68,68,0.18) 0,
+        rgba(239,68,68,0.18) 8px,
+        rgba(239,68,68,0.10) 8px,
+        rgba(239,68,68,0.10) 16px
+      ),
+      rgba(239,68,68,0.10);
+    border-top: 1px solid rgba(239,68,68,0.18);
+    border-bottom: 1px solid rgba(239,68,68,0.18);
+  }
+  #gantt-container .gantt-calendar-window-available {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(34,197,94,0.18) 0,
+        rgba(34,197,94,0.18) 8px,
+        rgba(34,197,94,0.10) 8px,
+        rgba(34,197,94,0.10) 16px
+      ),
+      rgba(34,197,94,0.10);
+    border-top: 1px solid rgba(34,197,94,0.18);
+    border-bottom: 1px solid rgba(34,197,94,0.18);
+  }
   #gantt-container .gantt-off-time-off_shift {
     background:
       repeating-linear-gradient(
@@ -397,6 +431,7 @@
     <span><span style="background:rgba(99,102,241,0.14);border:1px dashed rgba(99,102,241,0.55);"></span> Coffee break</span>
     <span><span style="background:rgba(71,85,105,0.22);border:1px solid rgba(71,85,105,0.55);"></span> Sunday off</span>
     <span><span style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);"></span> Capacity override</span>
+    <span><span style="background:rgba(34,197,94,0.14);border:1px solid rgba(34,197,94,0.45);"></span> Calendar window</span>
     <span style="margin-left:auto;color:var(--text3);background:transparent;border:none;">Click block for details</span>
   </div>
   <div id="gantt-container">
@@ -435,6 +470,7 @@ let ganttLoadedBlocksBySegmentId = {};
 let ganttLoadedMachines = [];
 let ganttLoadedCalendarByDate = {};
 let ganttLoadedOffTimeBlocksByKey = {};
+let ganttLoadedCalendarWindowsByKey = {};
 let ganttIsLoadingMore = false;
 let ganttAnchorDate = localISODate();
 let ganttLoadToken = 0;
@@ -677,6 +713,7 @@ function buildGanttCalendarArray() {
 function rebuildGanttTrialDataCache() {
   const blocks = Object.values(ganttLoadedBlocksBySegmentId);
   const offTimeBlocks = Object.values(ganttLoadedOffTimeBlocksByKey);
+  const calendarWindows = Object.values(ganttLoadedCalendarWindowsByKey);
   blocks.sort((a, b) => (
     String(a.plan_date || '').localeCompare(String(b.plan_date || ''))
   ) || (
@@ -697,6 +734,13 @@ function rebuildGanttTrialDataCache() {
   ) || (
     Number(a.end_min || 0) - Number(b.end_min || 0)
   ));
+  calendarWindows.sort((a, b) => (
+    String(a.start_at || '').localeCompare(String(b.start_at || ''))
+  ) || (
+    Number(a.machine_id || 0) - Number(b.machine_id || 0)
+  ) || (
+    Number(a.window_id || 0) - Number(b.window_id || 0)
+  ));
   ganttLoadedDates = Array.from(new Set(ganttLoadedDates)).sort(compareISODate);
   ganttLoadedMachines = Object.values(ganttLoadedMachines.reduce((acc, machine) => {
     const machineId = String(machine.machine_id || '');
@@ -711,6 +755,7 @@ function rebuildGanttTrialDataCache() {
     machines: ganttLoadedMachines.slice(),
     calendar: buildGanttCalendarArray(),
     off_time_blocks: offTimeBlocks,
+    calendar_windows: calendarWindows,
     blocks,
   };
   ganttTrialDataCache.display_blocks = buildGanttDisplayBlocks(ganttTrialDataCache.blocks);
@@ -723,6 +768,7 @@ function mergeGanttPayload(payload, { replace = false } = {}) {
   const incomingMachines = Array.isArray(payload?.machines) ? payload.machines : [];
   const incomingCalendar = Array.isArray(payload?.calendar) ? payload.calendar : [];
   const incomingOffTimeBlocks = Array.isArray(payload?.off_time_blocks) ? payload.off_time_blocks : [];
+  const incomingCalendarWindows = Array.isArray(payload?.calendar_windows) ? payload.calendar_windows : [];
   const incomingBlocks = Array.isArray(payload?.blocks) ? payload.blocks : [];
   if (replace) {
     ganttLoadedDates = [];
@@ -730,6 +776,7 @@ function mergeGanttPayload(payload, { replace = false } = {}) {
     ganttLoadedMachines = [];
     ganttLoadedCalendarByDate = {};
     ganttLoadedOffTimeBlocksByKey = {};
+    ganttLoadedCalendarWindowsByKey = {};
     ganttLoadedStart = '';
     ganttLoadedEnd = '';
   }
@@ -764,6 +811,11 @@ function mergeGanttPayload(payload, { replace = false } = {}) {
     const kind = String(block.kind || '').trim();
     const key = `${machineId}|${workDate}|${startMin}|${endMin}|${kind}|${String(block.reason || '').trim()}`;
     ganttLoadedOffTimeBlocksByKey[key] = { ...(ganttLoadedOffTimeBlocksByKey[key] || {}), ...block };
+  });
+  incomingCalendarWindows.forEach(window => {
+    const windowId = String(window.window_id || '').trim();
+    const key = windowId || `${String(window.machine_id || '')}|${String(window.start_at || '')}|${String(window.end_at || '')}|${String(window.window_type || '')}`;
+    ganttLoadedCalendarWindowsByKey[key] = { ...(ganttLoadedCalendarWindowsByKey[key] || {}), ...window };
   });
   if (incomingDates.length) {
     const minDate = incomingDates.reduce((minValue, workDate) => (!minValue || compareISODate(workDate, minValue) < 0 ? workDate : minValue), ganttLoadedStart || incomingDates[0]);
@@ -805,6 +857,19 @@ function ganttOffTimeBlocksForMachineDate(dateText, machine, offTimeBlocks) {
       Number(a.start_min || 0) - Number(b.start_min || 0)
     ) || (
       Number(a.end_min || 0) - Number(b.end_min || 0)
+    ));
+}
+
+function ganttCalendarWindowsForMachineDate(dateText, machine, calendarWindows) {
+  const workDate = String(dateText || '').trim();
+  const machineId = String(machine && machine.machine_id ? machine.machine_id : '').trim();
+  if (!workDate || !machineId) return [];
+  return (Array.isArray(calendarWindows) ? calendarWindows : [])
+    .filter(window => String(window.machine_id || '') === machineId && String(window.start_at || '').slice(0, 10) <= workDate && String(window.end_at || '').slice(0, 10) >= workDate)
+    .sort((a, b) => (
+      String(a.start_at || '').localeCompare(String(b.start_at || ''))
+    ) || (
+      String(a.end_at || '').localeCompare(String(b.end_at || ''))
     ));
 }
 
@@ -1411,6 +1476,7 @@ function renderGantt(data) {
     : [];
   const dates = Array.isArray(data.dates) ? data.dates : [];
   const offTimeBlocks = Array.isArray(data.off_time_blocks) ? data.off_time_blocks : [];
+  const calendarWindows = Array.isArray(data.calendar_windows) ? data.calendar_windows : [];
   const calMap = {};
   (Array.isArray(data.calendar) ? data.calendar : []).forEach(c => { calMap[c.work_date] = c; });
   const displayBlocks = buildGanttDisplayBlocks(blocks).sort((a, b) => (
@@ -1477,7 +1543,27 @@ function renderGantt(data) {
 
     for (const machine of machines) {
       const dayBlocks = displayBlocks.filter(block => String(block.machine_id || '') === String(machine.machine_id || '') && String(block.plan_date || '') === String(d || ''));
+      const dayCalendarWindows = ganttCalendarWindowsForMachineDate(d, machine, calendarWindows);
       html += `<div data-gantt-date="${escapeHtml(d)}" data-machine-id-col="${machine.machine_id}" data-date-drop="${d}" style="width:${machineWidth}px;flex-shrink:0;height:${scale.rowHeight}px;position:relative;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${!isWorkingDay ? 'rgba(239,68,68,0.05)' : (isSelectedDate ? 'rgba(59,130,246,0.03)' : 'transparent')}">`;
+      dayCalendarWindows.forEach(window => {
+        const windowStart = new Date(String(window.start_at || '').replace(' ', 'T'));
+        const windowEnd = new Date(String(window.end_at || '').replace(' ', 'T'));
+        const dayStart = new Date(`${d}T00:00:00`);
+        const dayEnd = new Date(`${d}T23:59:59`);
+        const start = windowStart < dayStart ? dayStart : windowStart;
+        const end = windowEnd > dayEnd ? dayEnd : windowEnd;
+        const startMin = Math.max(0, Math.min(1440, start.getHours() * 60 + start.getMinutes()));
+        const endMin = Math.max(startMin + 1, Math.max(0, Math.min(1440, end.getHours() * 60 + end.getMinutes())));
+        const top = scale.minuteToY(startMin);
+        const height = Math.max(0, scale.minuteToY(endMin) - top);
+        if (height > 0) {
+          const windowType = String(window.window_type || '').toUpperCase();
+          const kind = window.display_kind || (['OVERTIME', 'AVAILABLE'].includes(windowType) ? 'available' : 'blocked');
+          const label = String(window.note || '').trim() || windowType;
+          const title = `${label}${windowStart && windowEnd ? ` ${minuteText(startMin)}-${minuteText(endMin)}` : ''}`;
+          html += `<div class="gantt-calendar-window-band gantt-calendar-window-${escapeHtml(kind)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" style="top:${top}px;height:${height}px"></div>`;
+        }
+      });
       ganttOffTimeBlocksForMachineDate(d, machine, offTimeBlocks).forEach(block => {
         const top = scale.minuteToY(Number(block.start_min || 0));
         const height = Math.max(0, scale.minuteToY(Number(block.end_min || 0)) - top);

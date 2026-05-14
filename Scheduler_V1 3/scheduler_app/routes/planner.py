@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 
@@ -53,9 +53,131 @@ def _visual_minutes_of_day(value):
     return dt.hour * 60 + dt.minute
 
 
+def _void_actual(con, actual_id):
+    con.execute(
+        """
+        UPDATE production_actual
+        SET status = 'VOIDED', updated_at = CURRENT_TIMESTAMP
+        WHERE actual_id = ?
+        """,
+        (int(actual_id),),
+    )
+
+
+def _insert_actual(con, *, segment_id, block_id, report_date, output_qty, reject_qty, remarks, target_qty, machine_id, entry_type, correction_of_actual_id=None, created_by=""):
+    cur = con.execute(
+        """
+        INSERT INTO production_actual (
+          segment_id, block_id, machine_id, report_date, remarks, reported_at,
+          output_qty, reject_qty, target_qty_at_report, status, entry_type,
+          correction_of_actual_id, good_qty_at_report, created_by
+        ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
+        """,
+        (
+            segment_id,
+            block_id,
+            machine_id,
+            report_date,
+            compact_text(remarks),
+            output_qty,
+            reject_qty,
+            target_qty,
+            entry_type,
+            correction_of_actual_id,
+            None if output_qty is None or reject_qty is None else max(0.0, float(output_qty or 0) - float(reject_qty or 0)),
+            created_by,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def _active_actual_for_segment(con, segment_id):
+    return one(
+        con.execute(
+            """
+            SELECT *
+            FROM production_actual
+            WHERE segment_id = ?
+              AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+            ORDER BY actual_id DESC
+            LIMIT 1
+            """,
+            (int(segment_id),),
+        )
+    )
+
+
+def _active_actual_for_block_date(con, block_id, report_date):
+    return one(
+        con.execute(
+            """
+            SELECT *
+            FROM production_actual
+            WHERE block_id = ?
+              AND report_date = ?
+              AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+            ORDER BY CASE WHEN segment_id IS NULL THEN 1 ELSE 0 END, actual_id DESC
+            LIMIT 1
+            """,
+            (int(block_id), report_date),
+        )
+    )
+
+
+def _calendar_window_rows(con, start_iso=None, end_iso=None, machine_id=None, active=None, window_type=None):
+    clauses = []
+    params = []
+    if machine_id:
+        clauses.append("w.machine_id = ?")
+        params.append(int(machine_id))
+    if start_iso:
+        clauses.append("w.end_at > ?")
+        params.append(start_iso)
+    if end_iso:
+        clauses.append("w.start_at < ?")
+        params.append(end_iso)
+    if active is not None:
+        clauses.append("w.active = ?")
+        params.append(1 if int(active) else 0)
+    if window_type:
+        clauses.append("w.window_type = ?")
+        params.append(compact_text(window_type).upper())
+    where_clause = " AND ".join(clauses) if clauses else "1 = 1"
+    return rows(
+        con.execute(
+            f"""
+            SELECT w.*, m.machine_code
+            FROM machine_calendar_window w
+            LEFT JOIN machines m ON m.machine_id = w.machine_id
+            WHERE {where_clause}
+            ORDER BY w.start_at, w.window_id
+            """,
+            params,
+        )
+    )
+
+
+def _calendar_window_payload(row):
+    window_type = compact_text(row.get("window_type")).upper()
+    return {
+        "window_id": int(row.get("window_id") or 0),
+        "machine_id": int(row.get("machine_id") or 0),
+        "machine_code": compact_text(row.get("machine_code") or ""),
+        "start_at": compact_text(row.get("start_at") or ""),
+        "end_at": compact_text(row.get("end_at") or ""),
+        "window_type": window_type,
+        "capacity_minutes": int(row.get("capacity_minutes") or 0),
+        "note": compact_text(row.get("note") or ""),
+        "active": int(row.get("active") or 0),
+        "display_kind": "available" if window_type in {"OVERTIME", "AVAILABLE"} else "blocked",
+    }
+
+
 @trial_bp.get("/api/trial/schedule")
 def api_trial_schedule():
     include_completed = int(request.args.get("include_completed") or 0)
+    start_iso = compact_text(request.args.get("start") or request.args.get("from")) or date.today().isoformat()
+    end_iso = compact_text(request.args.get("end") or request.args.get("to")) or (date.today() + timedelta(days=7)).isoformat()
     with db() as con:
         stale_cards = rows(
             con.execute(
@@ -118,6 +240,7 @@ def api_trial_schedule():
                 JOIN operation o ON o.operation_id = b.operation_id
                 JOIN machines m ON m.machine_id = b.machine_id
                 LEFT JOIN run_block_group g ON g.group_id = b.group_id
+                WHERE COALESCE(b.active, 1) = 1
                 ORDER BY b.machine_id, b.queue_position, b.block_id
                 """
             )
@@ -128,6 +251,7 @@ def api_trial_schedule():
                 SELECT s.*, b.operation_id
                 FROM run_block_segment s
                 JOIN run_block b ON b.block_id = s.block_id
+                WHERE COALESCE(b.active, 1) = 1
                 ORDER BY b.machine_id, b.queue_position, s.segment_id
                 """
             )
@@ -200,6 +324,7 @@ def api_trial_schedule():
                        output_qty, reject_qty, target_qty_at_report,
                        remarks, reported_at
                 FROM production_actual
+                WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
                 ORDER BY report_date, actual_id
                 """
             )
@@ -220,6 +345,7 @@ def api_trial_schedule():
         group_ids = sorted({int(row["group_id"]) for row in blocks if int(row["group_id"] or 0) > 0})
         block_groups = [combined_group_summary(con, group_id) for group_id in group_ids]
         block_groups = [group for group in block_groups if group]
+        calendar_windows = [_calendar_window_payload(row) for row in _calendar_window_rows(con, start_iso, end_iso)]
 
         ps_ids = set()
         planned_starts = {}
@@ -267,6 +393,7 @@ def api_trial_schedule():
                 "catalog": catalog["available"],
                 "planned": catalog["planned"],
                 "planning_cards": planning_cards,
+                "calendar_windows": calendar_windows,
             }
         )
 
@@ -320,6 +447,159 @@ def api_trial_capacity():
         return jsonify({"ok": True})
 
 
+@trial_bp.get("/api/trial/machine-calendar-windows")
+def api_trial_machine_calendar_windows_list():
+    machine_id = int(request.args.get("machine_id") or 0)
+    active_arg = request.args.get("active")
+    window_type = compact_text(request.args.get("window_type")).upper()
+    from_iso = compact_text(request.args.get("from"))
+    to_iso = compact_text(request.args.get("to"))
+    active = None
+    if active_arg is not None and compact_text(active_arg) != "":
+        active = 1 if compact_text(active_arg).lower() in {"1", "true", "yes", "on"} else 0
+    with db() as con:
+        windows = [_calendar_window_payload(row) for row in _calendar_window_rows(con, from_iso or None, to_iso or None, machine_id or None, active, window_type or None)]
+        return jsonify({"ok": True, "calendar_windows": windows})
+
+
+@trial_bp.post("/api/trial/machine-calendar-windows")
+def api_trial_machine_calendar_windows_create():
+    data = request.get_json(force=True, silent=True) or {}
+    machine_id = int(data.get("machine_id") or 0)
+    start_at = compact_text(data.get("start_at"))
+    end_at = compact_text(data.get("end_at"))
+    window_type = compact_text(data.get("window_type")).upper()
+    note = compact_text(data.get("note"))
+    capacity_minutes = int(parse_number(data.get("capacity_minutes"), 0))
+    active = 1 if data.get("active", 1) else 0
+    allowed_types = {"AVAILABLE", "DOWN", "OVERTIME", "HOLIDAY", "MAINTENANCE", "BLOCKED"}
+    if not machine_id:
+        return jsonify({"error": "Machine is required"}), 400
+    if not start_at or not end_at:
+        return jsonify({"error": "start_at and end_at are required"}), 400
+    if window_type not in allowed_types:
+        return jsonify({"error": "Invalid window_type"}), 400
+    try:
+        start_dt = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
+    except ValueError:
+        return jsonify({"error": "start_at and end_at must be ISO datetimes"}), 400
+    if end_dt <= start_dt:
+        return jsonify({"error": "start_at must be earlier than end_at"}), 400
+    with db() as con:
+        machine = one(con.execute("SELECT machine_id FROM machines WHERE machine_id = ?", (machine_id,)))
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+        cur = con.execute(
+            """
+            INSERT INTO machine_calendar_window (
+              machine_id, start_at, end_at, window_type, capacity_minutes, note, active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (
+                machine_id,
+                start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                window_type,
+                capacity_minutes,
+                note,
+                active,
+            ),
+        )
+        recalculate_machine(con, machine_id)
+        row = one(
+            con.execute(
+                """
+                SELECT w.*, m.machine_code
+                FROM machine_calendar_window w
+                LEFT JOIN machines m ON m.machine_id = w.machine_id
+                WHERE w.window_id = ?
+                """,
+                (int(cur.lastrowid),),
+            )
+        )
+        return jsonify({"ok": True, "window": _calendar_window_payload(row)})
+
+
+@trial_bp.patch("/api/trial/machine-calendar-windows/<int:window_id>")
+def api_trial_machine_calendar_windows_update(window_id):
+    data = request.get_json(force=True, silent=True) or {}
+    with db() as con:
+        row = one(con.execute("SELECT * FROM machine_calendar_window WHERE window_id = ?", (int(window_id),)))
+        if not row:
+            return jsonify({"error": "Window not found"}), 404
+        allowed_types = {"AVAILABLE", "DOWN", "OVERTIME", "HOLIDAY", "MAINTENANCE", "BLOCKED"}
+        updates = {}
+        machine_id = int(data.get("machine_id") or row["machine_id"])
+        if "machine_id" in data:
+            machine = one(con.execute("SELECT machine_id FROM machines WHERE machine_id = ?", (machine_id,)))
+            if not machine:
+                return jsonify({"error": "Machine not found"}), 404
+            updates["machine_id"] = machine_id
+        if "start_at" in data:
+            updates["start_at"] = compact_text(data.get("start_at"))
+        if "end_at" in data:
+            updates["end_at"] = compact_text(data.get("end_at"))
+        if "window_type" in data:
+            window_type = compact_text(data.get("window_type")).upper()
+            if window_type not in allowed_types:
+                return jsonify({"error": "Invalid window_type"}), 400
+            updates["window_type"] = window_type
+        if "capacity_minutes" in data:
+            updates["capacity_minutes"] = int(parse_number(data.get("capacity_minutes"), 0))
+        if "note" in data:
+            updates["note"] = compact_text(data.get("note"))
+        if "active" in data:
+            updates["active"] = 1 if data.get("active") else 0
+        if "start_at" in updates or "end_at" in updates:
+            try:
+                start_dt = datetime.fromisoformat((updates.get("start_at") or row["start_at"]).replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat((updates.get("end_at") or row["end_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                return jsonify({"error": "start_at and end_at must be ISO datetimes"}), 400
+            if end_dt <= start_dt:
+                return jsonify({"error": "start_at must be earlier than end_at"}), 400
+            updates["start_at"] = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+            updates["end_at"] = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+        if updates:
+            set_clause = ", ".join(f"{key} = ?" for key in updates)
+            con.execute(
+                f"UPDATE machine_calendar_window SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE window_id = ?",
+                (*updates.values(), int(window_id)),
+            )
+        recalculate_machine(con, machine_id)
+        row = one(
+            con.execute(
+                """
+                SELECT w.*, m.machine_code
+                FROM machine_calendar_window w
+                LEFT JOIN machines m ON m.machine_id = w.machine_id
+                WHERE w.window_id = ?
+                """,
+                (int(window_id),),
+            )
+        )
+        return jsonify({"ok": True, "window": _calendar_window_payload(row)})
+
+
+@trial_bp.delete("/api/trial/machine-calendar-windows/<int:window_id>")
+def api_trial_machine_calendar_windows_delete(window_id):
+    with db() as con:
+        row = one(con.execute("SELECT * FROM machine_calendar_window WHERE window_id = ?", (int(window_id),)))
+        if not row:
+            return jsonify({"error": "Window not found"}), 404
+        con.execute(
+            """
+            UPDATE machine_calendar_window
+            SET active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE window_id = ?
+            """,
+            (int(window_id),),
+        )
+        recalculate_machine(con, int(row["machine_id"]))
+        return jsonify({"ok": True, "window_id": int(window_id)})
+
+
 @trial_bp.post("/api/trial/operations")
 def api_trial_create_operation():
     data = request.get_json(force=True, silent=True) or {}
@@ -361,9 +641,9 @@ def api_trial_create_operation():
             ),
         )
         operation_id = int(op_cur.lastrowid)
-        queue_position = int(data.get("queue_position") or 0)
+        queue_position = float(data.get("queue_position") or 0)
         if queue_position <= 0:
-            queue_position = 1 + int(one(con.execute("SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?", (machine_id,)))["mx"] or 0)
+            queue_position = 1 + float(one(con.execute("SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?", (machine_id,)))["mx"] or 0)
         block_cur = con.execute(
             """
             INSERT INTO run_block (
@@ -385,7 +665,7 @@ def api_trial_create_operation():
             ),
         )
         recalculate_machine(con, machine_id)
-        return jsonify({"ok": True, "operation_id": operation_id, "block": trial_block_payload(trial_block_row(con, block_cur.lastrowid))})
+        return jsonify({"ok": True, "operation_id": operation_id, "block": trial_block_payload(trial_block_row(con, block_cur.lastrowid), con)})
 
 
 @trial_bp.post("/api/trial/catalog/combine")
@@ -414,7 +694,7 @@ def api_trial_create_planning_card():
 def api_trial_schedule_planning_card(card_id):
     data = request.get_json(force=True, silent=True) or {}
     machine_id = int(data.get("machine_id") or 0)
-    queue_position = int(data.get("queue_position") or 0)
+    queue_position = float(data.get("queue_position") or 0)
     with db() as con:
         try:
             result = schedule_planning_card(con, card_id, machine_id, queue_position)
@@ -481,7 +761,7 @@ def api_trial_update_block(block_id):
         if "machine_id" in data:
             block_updates["machine_id"] = int(data.get("machine_id") or block["machine_id"])
         if "queue_position" in data:
-            block_updates["queue_position"] = max(1, int(data.get("queue_position") or block["queue_position"]))
+            block_updates["queue_position"] = max(1.0, float(data.get("queue_position") or block["queue_position"]))
         if "scheduled_qty" in data:
             block_updates["scheduled_qty"] = max(0.0, parse_number(data.get("scheduled_qty"), block["scheduled_qty"]))
         if "include_setup" in data:
@@ -505,7 +785,7 @@ def api_trial_update_block(block_id):
             machine_ids.add(int(block_updates["machine_id"]))
         for machine_id in machine_ids:
             recalculate_machine(con, machine_id)
-        return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id))})
+        return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id), con)})
 
 
 @trial_bp.post("/api/trial/blocks/<int:block_id>/split")
@@ -521,7 +801,7 @@ def api_trial_split_block(block_id):
         if split_qty >= float(block["scheduled_qty"] or 0):
             return jsonify({"error": "Split quantity must be smaller than the scheduled quantity"}), 400
         remaining = float(block["scheduled_qty"] or 0) - split_qty
-        max_position = int(one(con.execute("SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?", (int(block["machine_id"]),)))["mx"] or 0)
+        max_position = float(one(con.execute("SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?", (int(block["machine_id"]),)))["mx"] or 0)
         con.execute("UPDATE run_block SET scheduled_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE block_id = ?", (split_qty, block_id))
         planning_status, execution_status = normalize_block_status_inputs(
             {"planning_status": block["planning_status"], "execution_status": block["execution_status"], "status": block["status"]},
@@ -538,7 +818,7 @@ def api_trial_split_block(block_id):
             (
                 int(block["operation_id"]),
                 int(block["machine_id"]),
-                max_position + 1,
+                float(max_position) + 1,
                 remaining,
                 int(block["include_setup"] or 0),
                 execution_status,
@@ -548,7 +828,7 @@ def api_trial_split_block(block_id):
             ),
         )
         recalculate_machine(con, int(block["machine_id"]))
-        return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id)), "new_block": trial_block_payload(trial_block_row(con, cur.lastrowid))})
+        return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id), con), "new_block": trial_block_payload(trial_block_row(con, cur.lastrowid), con)})
 
 
 @trial_bp.post("/api/trial/blocks/<int:block_id>/reorder")
@@ -577,7 +857,7 @@ def api_trial_reorder_blocks(block_id):
         for idx, ordered_block_id in enumerate(ordered_ids, 1):
             con.execute(
                 "UPDATE run_block SET machine_id = ?, queue_position = ?, updated_at = CURRENT_TIMESTAMP WHERE block_id = ?",
-                (machine_id, idx, ordered_block_id),
+                (machine_id, float(idx), ordered_block_id),
             )
         for affected_machine_id in affected_machine_ids:
             recalculate_machine(con, affected_machine_id)
@@ -675,16 +955,7 @@ def api_trial_segment_actual(segment_id):
         block_id = int(segment["block_id"])
         machine_id = int(segment["machine_id"])
         report_date = compact_text(segment["segment_date"])
-        existing = one(
-            con.execute(
-                """
-                SELECT *
-                FROM production_actual
-                WHERE segment_id = ?
-                """,
-                (int(segment_id),),
-            )
-        )
+        existing = _active_actual_for_segment(con, segment_id)
 
         output_provided = "output_qty" in data
         reject_provided = "reject_qty" in data
@@ -696,54 +967,33 @@ def api_trial_segment_actual(segment_id):
         stored_target_qty = existing["target_qty_at_report"] if existing and existing["target_qty_at_report"] is not None else None
         target_qty = float(stored_target_qty if stored_target_qty is not None else segment["qty_done"] or 0)
         old_output_qty = existing["output_qty"] if existing else None
-        old_output_diff = 0.0 if old_output_qty is None else float(old_output_qty) - target_qty
-        new_output_diff = (float(output_qty) - target_qty) if output_provided and output_qty is not None else old_output_diff
-        output_delta = new_output_diff - old_output_diff
+        old_reject_qty = existing["reject_qty"] if existing else None
+        old_good_qty = 0.0 if old_output_qty is None or old_reject_qty is None else max(0.0, float(old_output_qty) - float(old_reject_qty))
+        next_output_qty = output_qty if output_provided else (old_output_qty if existing else None)
+        next_reject_qty = reject_qty if reject_provided else (old_reject_qty if existing else None)
+        new_good_qty = 0.0 if next_output_qty is None or next_reject_qty is None else max(0.0, float(next_output_qty) - float(next_reject_qty))
+        output_delta = new_good_qty - old_good_qty
         rework_source = find_rework_source_for_reject(con, block_id) if reject_provided and reject_qty and reject_qty > 0 else None
         output_adjustment = {"changed": False, "applied_qty": 0.0}
         if output_provided and output_delta != 0:
             output_adjustment = apply_output_delta_to_block_tail(con, block_id, report_date, output_delta)
 
         if existing:
-            updates = []
-            params = []
-            if output_provided:
-                updates.append("output_qty = ?")
-                params.append(output_qty)
-            if reject_provided:
-                updates.append("reject_qty = ?")
-                params.append(reject_qty)
-            if remarks_provided:
-                updates.append("remarks = ?")
-                params.append(remarks)
-            updates.append("target_qty_at_report = COALESCE(target_qty_at_report, ?)")
-            params.append(target_qty)
-            updates.append("reported_at = CURRENT_TIMESTAMP")
-            con.execute(
-                f"""
-                UPDATE production_actual
-                SET {", ".join(updates)}
-                WHERE actual_id = ?
-                """,
-                (*params, int(existing["actual_id"])),
-            )
-        else:
-            con.execute(
-                """
-                INSERT INTO production_actual (
-                  segment_id, block_id, report_date, output_qty, reject_qty, remarks, target_qty_at_report, reported_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                (
-                    int(segment_id),
-                    block_id,
-                    report_date,
-                    output_qty if output_provided else None,
-                    reject_qty if reject_provided else None,
-                    remarks if remarks_provided else "",
-                    target_qty,
-                ),
-            )
+            _void_actual(con, existing["actual_id"])
+        _insert_actual(
+            con,
+            segment_id=int(segment_id),
+            block_id=block_id,
+            report_date=report_date,
+            output_qty=next_output_qty,
+            reject_qty=next_reject_qty,
+            remarks=remarks if remarks_provided else (existing["remarks"] if existing else ""),
+            target_qty=target_qty,
+            machine_id=machine_id,
+            entry_type="CORRECTION" if existing else "REPORT",
+            correction_of_actual_id=int(existing["actual_id"]) if existing else None,
+            created_by=compact_text(data.get("created_by")),
+        )
 
         rework = {"created": False, "machine_id": 0}
         removed_rework_machine_ids = set()
@@ -801,7 +1051,7 @@ def api_trial_segment_actual(segment_id):
                 "schedule_adjusted": schedule_adjusted,
                 "rework_created": bool(rework["created"]),
                 "message": " ".join(message_parts).strip() or "Actual saved.",
-                "block": trial_block_payload(trial_block_row(con, block_id)),
+                "block": trial_block_payload(trial_block_row(con, block_id), con),
             }
         )
 
@@ -816,55 +1066,43 @@ def api_trial_actual(block_id):
         delete_dates = [compact_text(v) for v in (data.get("delete_actual_dates") or []) if compact_text(v)]
         daily_actuals = data.get("daily_actuals") or []
         for report_date in delete_dates:
-            con.execute("DELETE FROM production_actual WHERE block_id = ? AND report_date = ?", (int(block_id), report_date))
+            existing_rows = rows(
+                con.execute(
+                    """
+                    SELECT actual_id
+                    FROM production_actual
+                    WHERE block_id = ?
+                      AND report_date = ?
+                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    """,
+                    (int(block_id), report_date),
+                )
+            )
+            for row in existing_rows:
+                _void_actual(con, int(row["actual_id"]))
         for row in daily_actuals:
             report_date = compact_text(row.get("report_date"))
             if not report_date:
                 continue
             output_value = parse_number(row.get("output_qty") if "output_qty" in row else row.get("actual_good_qty"), 0)
             reject_value = parse_number(row.get("reject_qty") if "reject_qty" in row else row.get("actual_reject_qty"), 0)
-            existing = one(
-                con.execute(
-                    """
-                    SELECT actual_id
-                    FROM production_actual
-                    WHERE block_id = ? AND report_date = ?
-                    ORDER BY CASE WHEN segment_id IS NULL THEN 1 ELSE 0 END, actual_id
-                    LIMIT 1
-                    """,
-                    (int(block_id), report_date),
-                )
-            )
+            existing = _active_actual_for_block_date(con, block_id, report_date)
             if existing:
-                con.execute(
-                    """
-                    UPDATE production_actual
-                    SET output_qty = ?, reject_qty = ?, remarks = ?, target_qty_at_report = COALESCE(target_qty_at_report, ?), reported_at = CURRENT_TIMESTAMP
-                    WHERE actual_id = ?
-                    """,
-                    (
-                        output_value,
-                        reject_value,
-                        compact_text(row.get("remarks")),
-                        parse_number(block["scheduled_qty"], 0),
-                        int(existing["actual_id"]),
-                    ),
-                )
-            else:
-                con.execute(
-                    """
-                    INSERT INTO production_actual (segment_id, block_id, report_date, output_qty, reject_qty, remarks, target_qty_at_report, reported_at)
-                    VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """,
-                    (
-                        int(block_id),
-                        report_date,
-                        output_value,
-                        reject_value,
-                        compact_text(row.get("remarks")),
-                        parse_number(block["scheduled_qty"], 0),
-                    ),
-                )
+                _void_actual(con, existing["actual_id"])
+            _insert_actual(
+                con,
+                segment_id=None,
+                block_id=int(block_id),
+                report_date=report_date,
+                output_qty=output_value,
+                reject_qty=reject_value,
+                remarks=compact_text(row.get("remarks")),
+                target_qty=parse_number(block["scheduled_qty"], 0),
+                machine_id=int(block["machine_id"]),
+                entry_type="CORRECTION" if existing else "REPORT",
+                correction_of_actual_id=int(existing["actual_id"]) if existing else None,
+                created_by=compact_text(row.get("created_by")),
+            )
         refresh_block_actual_status(con, block_id)
         recalculate_machine(con, int(block["machine_id"]))
         actuals = rows(
@@ -880,7 +1118,7 @@ def api_trial_actual(block_id):
                 (int(block_id),),
             )
         )
-        return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id)), "actuals": [dict(r) for r in actuals]})
+        return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id), con), "actuals": [dict(r) for r in actuals]})
 
 
 @trial_bp.post("/api/trial/recalc")

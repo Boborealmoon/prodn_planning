@@ -8,6 +8,7 @@
   <div class="trial-toolbar">
   <button class="btn btn-primary btn-sm" onclick="openTrialCreateModal()">Add Run Block</button>
   <button class="btn btn-ghost btn-sm" onclick="openTrialCapacityModal()">Shop Calendar</button>
+  <button class="btn btn-ghost btn-sm" onclick="openTrialMachineWindowModal()">Machine Windows</button>
   <a class="btn btn-ghost btn-sm" href="/materials">Materials</a>
   <span class="trial-note">Ops combine inside the PS first, then op cards move to machine queues.</span>
 </div>
@@ -1142,7 +1143,7 @@ function trialAddDaysISO(dateText, deltaDays) {
 
 function trialNormalizeScheduleDates(startText, endText) {
   const today = trialTodayISO();
-  let start = String(startText || '').trim() || today;
+  let start = String(startText || '').trim();
   let end = String(endText || '').trim();
   if (end && end < start) end = start;
   return { start, end };
@@ -3235,6 +3236,82 @@ function openTrialCapacityModal(startDate = '', dayCount = 14) {
     </div>
   `;
   openModal('Shop Calendar', bodyHtml, 'lg');
+}
+
+function trialMachineWindowTypeOptions(selected) {
+  const options = ['DOWN', 'MAINTENANCE', 'BLOCKED', 'OVERTIME', 'HOLIDAY', 'AVAILABLE'];
+  return options.map(value => `<option value="${value}" ${String(selected || 'DOWN') === value ? 'selected' : ''}>${value}</option>`).join('');
+}
+
+async function openTrialMachineWindowModal() {
+  const machineOptions = (trialState.machines || []).map(machine => `<option value="${machine.machine_id}">${escapeHtml(machine.machine_code || '')}</option>`).join('');
+  const today = trialTodayLocal();
+  const windows = await GET('/api/trial/machine-calendar-windows?active=1');
+  const rows = (windows.calendar_windows || []).map(window => `
+    <div class="trial-capacity-row" style="align-items:center">
+      <div style="min-width:0">
+        <div style="font-weight:800">${escapeHtml(window.machine_code || `Machine ${window.machine_id}`)} · ${escapeHtml(window.window_type || '')}</div>
+        <div style="font-size:11px;color:var(--text3)">${escapeHtml(window.start_at || '')} → ${escapeHtml(window.end_at || '')}${window.note ? ` · ${escapeHtml(window.note)}` : ''}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="deactivateTrialMachineWindow(${Number(window.window_id || 0)})">Deactivate</button>
+    </div>
+  `).join('');
+  openModal('Machine Windows', `
+    <div class="trial-capacity-modal">
+      <div class="trial-capacity-modal-head">
+        <div>
+          <div style="font-size:18px;font-weight:900;letter-spacing:-0.03em">Machine Windows</div>
+          <div style="font-size:12px;color:var(--text3)">Capacity overlays that block or add time without creating queue items.</div>
+        </div>
+      </div>
+      <div class="trial-modal-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px">
+        <label>Machine <select id="trial-window-machine">${machineOptions}</select></label>
+        <label>Type <select id="trial-window-type">${trialMachineWindowTypeOptions('DOWN')}</select></label>
+        <label>Start <input id="trial-window-start" type="datetime-local" value="${today}T14:00"></label>
+        <label>End <input id="trial-window-end" type="datetime-local" value="${today}T15:00"></label>
+        <label class="full">Note <input id="trial-window-note" type="text" placeholder="Spindle alarm / planned service"></label>
+        <label>Capacity Minutes <input id="trial-window-capacity" type="number" min="0" step="1" value="0"></label>
+      </div>
+      <div class="trial-modal-actions" style="justify-content:flex-start;padding:0 0 12px">
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveTrialMachineWindow()">Save Window</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;display:grid;gap:8px;max-height:260px;overflow:auto">
+        <div style="font-size:12px;font-weight:800;color:var(--text3);letter-spacing:0.08em;text-transform:uppercase">Active Windows</div>
+        ${rows || '<div style="color:var(--text3);font-size:12px">No active machine windows.</div>'}
+      </div>
+    </div>
+  `, 'lg');
+}
+
+async function saveTrialMachineWindow() {
+  try {
+    await POST('/api/trial/machine-calendar-windows', {
+      machine_id: Number(document.getElementById('trial-window-machine').value || 0),
+      window_type: document.getElementById('trial-window-type').value,
+      start_at: document.getElementById('trial-window-start').value,
+      end_at: document.getElementById('trial-window-end').value,
+      capacity_minutes: Number(document.getElementById('trial-window-capacity').value || 0),
+      note: document.getElementById('trial-window-note').value,
+      active: 1,
+    });
+    toast('Machine window saved', 'success');
+    closeModal();
+    await loadTrial();
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, 'error');
+  }
+}
+
+async function deactivateTrialMachineWindow(windowId) {
+  try {
+    await DEL(`/api/trial/machine-calendar-windows/${Number(windowId || 0)}`);
+    toast('Machine window deactivated', 'success');
+    closeModal();
+    await loadTrial();
+  } catch (err) {
+    toast(`Deactivate failed: ${err.message}`, 'error');
+  }
 }
 
 function openTrialCreateModal(defaultMachineId = '') {

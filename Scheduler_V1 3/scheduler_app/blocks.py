@@ -5,7 +5,16 @@ from datetime import date, datetime, timedelta
 
 from .actuals import actual_totals_for_block
 from .db import date_text, one, parse_dt_text, rows
-from .machines import capacity_minutes_for_machine_day
+from .machines import capacity_minutes_for_machine_day, machine_work_intervals_for_day
+from .scheduler_state import (
+    create_schedule_run,
+    refresh_operation_state,
+    refresh_process_sheet_state,
+    refresh_states_for_machine,
+    refresh_machine_queue_state,
+    resolve_schedule_alert,
+    upsert_schedule_alert,
+)
 from .utils import compact_text, format_qty
 
 
@@ -28,26 +37,63 @@ def trial_block_row(con, block_id):
     )
 
 
-def trial_block_payload(block):
+def _queue_state_for_block(con, block_id):
+    if not con:
+        return None
+    return one(
+        con.execute(
+            """
+            SELECT *
+            FROM machine_queue_state
+            WHERE block_id = ?
+            """,
+            (int(block_id),),
+        )
+    )
+
+
+def trial_block_payload(block, con=None):
     if not block:
         return None
     planning_status = block.get("planning_status", "UNPLANNED") or "UNPLANNED"
     execution_status = block.get("execution_status", block.get("status", "NOT_STARTED")) or "NOT_STARTED"
+    queue_state = _queue_state_for_block(con, block["block_id"]) if con else None
+    predicted_start_at = (queue_state["predicted_start_at"] if queue_state and queue_state["predicted_start_at"] else block.get("calculated_start_datetime") or block.get("planned_start_at") or "")
+    predicted_end_at = (queue_state["predicted_end_at"] if queue_state and queue_state["predicted_end_at"] else block.get("calculated_end_datetime") or block.get("planned_end_at") or "")
+    remaining_qty = float(queue_state["remaining_qty"] if queue_state and queue_state["remaining_qty"] is not None else max(0.0, float(block["scheduled_qty"] or 0) - max(0.0, float(block["actual_good_qty"] or 0))))
+    good_qty = float(queue_state["good_qty"] if queue_state and queue_state["good_qty"] is not None else float(block["actual_good_qty"] or 0))
+    reject_qty = float(queue_state["reject_qty"] if queue_state and queue_state["reject_qty"] is not None else float(block["actual_reject_qty"] or 0))
+    schedule_status = queue_state["schedule_status"] if queue_state and queue_state["schedule_status"] else planning_status
     return {
         "block_id": int(block["block_id"]),
         "operation_id": int(block["operation_id"]),
         "machine_id": int(block["machine_id"]),
-        "queue_position": int(block["queue_position"] or 0),
+        "queue_position": float(block["queue_position"] or 0),
         "scheduled_qty": float(block["scheduled_qty"] or 0),
         "include_setup": int(block["include_setup"] or 0),
         "status": execution_status,
         "planning_status": planning_status,
         "execution_status": execution_status,
         "anchor_datetime": block["anchor_datetime"] or "",
+        "planned_start_at": block.get("planned_start_at") or "",
+        "planned_end_at": block.get("planned_end_at") or "",
+        "allow_pull_forward": int(block.get("allow_pull_forward") if block.get("allow_pull_forward") is not None else 1),
+        "active": int(block.get("active") if block.get("active") is not None else 1),
+        "is_fresh_monday_item": int(block.get("is_fresh_monday_item") or 0),
+        "last_schedule_run_id": int(block.get("last_schedule_run_id") or 0),
+        "planned_qty_original": float(block.get("planned_qty_original") or 0),
+        "split_from_block_id": int(block.get("split_from_block_id") or 0),
+        "scheduler_note": block.get("scheduler_note") or "",
         "calculated_start_datetime": block["calculated_start_datetime"] or "",
         "calculated_end_datetime": block["calculated_end_datetime"] or "",
-        "actual_good_qty": float(block["actual_good_qty"] or 0),
-        "actual_reject_qty": float(block["actual_reject_qty"] or 0),
+        "predicted_start_at": predicted_start_at,
+        "predicted_end_at": predicted_end_at,
+        "actual_good_qty": good_qty,
+        "actual_reject_qty": reject_qty,
+        "good_qty": good_qty,
+        "reject_qty": reject_qty,
+        "remaining_qty": remaining_qty,
+        "schedule_status": schedule_status,
         "remarks": block["remarks"] or "",
         "job_no": block["job_no"] or "",
         "operation_name": block["operation_name"] or "",
@@ -83,6 +129,7 @@ def schedule_signature_for_machine(con, machine_id):
                 SELECT block_id, calculated_start_datetime, calculated_end_datetime
                 FROM run_block
                 WHERE machine_id = ?
+                  AND COALESCE(active, 1) = 1
                 ORDER BY queue_position, block_id
                 """,
                 (int(machine_id),),
@@ -102,7 +149,43 @@ def next_capacity_date_for_machine(con, machine_id, after_date: date):
     return probe, cap
 
 
-def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add):
+def dependency_finish_for_block(con, block):
+    source_ps_id = compact_text(block.get("source_ps_id") or "")
+    source_op_seq_id = int(block.get("source_op_seq_id") or 0)
+    if not source_ps_id or not source_op_seq_id:
+        return None
+    current_step = one(
+        con.execute(
+            """
+            SELECT seq_no
+            FROM operation_seq
+            WHERE op_seq_id = ?
+            """,
+            (source_op_seq_id,),
+        )
+    )
+    if not current_step:
+        return None
+    prev_row = one(
+        con.execute(
+            """
+            SELECT MAX(COALESCE(q.predicted_end_at, b.calculated_end_datetime, b.planned_end_at, b.anchor_datetime)) AS dependency_finish
+            FROM run_block b
+            JOIN operation o ON o.operation_id = b.operation_id
+            JOIN operation_seq s ON s.op_seq_id = o.source_op_seq_id
+            LEFT JOIN machine_queue_state q ON q.block_id = b.block_id
+            WHERE COALESCE(o.source_ps_id, '') = ?
+              AND COALESCE(b.active, 1) = 1
+              AND s.seq_no < ?
+            """,
+            (source_ps_id, int(current_step["seq_no"] or 0)),
+        )
+    )
+    finish_text = compact_text(prev_row["dependency_finish"] if prev_row else "")
+    return parse_dt_text(finish_text) if finish_text else None
+
+
+def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add, schedule_run_id=None):
     block = trial_block_row(con, block_id)
     if not block:
         return False
@@ -122,46 +205,42 @@ def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add):
 
     while remaining_qty > 0 and safety < 370:
         safety += 1
-        cap = capacity_minutes_for_machine_day(con, machine_id, work_date)
-        capacity_minutes = int(cap["capacity_minutes"] or 0)
-        if capacity_minutes <= 0:
+        intervals = machine_work_intervals_for_day(con, machine_id, work_date)
+        if not intervals:
             work_date += timedelta(days=1)
             continue
-
-        start_minute = int(cap["start_minute"] or 0)
-        day_start = datetime.combine(work_date, datetime.min.time()).replace(
-            hour=start_minute // 60,
-            minute=start_minute % 60,
-            second=0,
-            microsecond=0,
-        )
-        max_qty_today = math.floor(capacity_minutes / cycle_time)
-        if max_qty_today <= 0:
-            work_date += timedelta(days=1)
-            continue
-
-        qty_today = min(remaining_qty, max_qty_today)
-        minutes_used = qty_today * cycle_time
-        end_dt = day_start + timedelta(minutes=minutes_used)
-        con.execute(
-            """
-            INSERT INTO run_block_segment (
-              block_id, machine_id, segment_date, segment_type,
-              qty_done, minutes_used, start_datetime, end_datetime, is_actual
-            ) VALUES (?, ?, ?, 'production', ?, ?, ?, ?, 0)
-            """,
-            (
-                int(block_id),
-                machine_id,
-                date_text(work_date),
-                qty_today,
-                minutes_used,
-                day_start.strftime("%Y-%m-%d %H:%M:%S"),
-                end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-            ),
-        )
-        remaining_qty -= qty_today
-        changed = True
+        for interval_start, interval_end in intervals:
+            if remaining_qty <= 0:
+                break
+            available_minutes = max(0.0, (interval_end - interval_start).total_seconds() / 60.0)
+            max_qty_today = math.floor(available_minutes / cycle_time)
+            if max_qty_today <= 0:
+                continue
+            qty_today = min(remaining_qty, max_qty_today)
+            minutes_used = qty_today * cycle_time
+            end_dt = interval_start + timedelta(minutes=minutes_used)
+            con.execute(
+                """
+                INSERT INTO run_block_segment (
+                  block_id, machine_id, schedule_run_id, segment_date, segment_type,
+                  qty_done, planned_qty, minutes_used, planned_minutes, segment_status, start_datetime, end_datetime, is_actual
+                ) VALUES (?, ?, ?, ?, 'production', ?, ?, ?, ?, 'PLANNED', ?, ?, 0)
+                """,
+                (
+                    int(block_id),
+                    machine_id,
+                    int(schedule_run_id) if schedule_run_id is not None else None,
+                    date_text(work_date),
+                    qty_today,
+                    minutes_used,
+                    qty_today,
+                    minutes_used,
+                    interval_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            remaining_qty -= qty_today
+            changed = True
         work_date += timedelta(days=1)
 
     return changed
@@ -194,6 +273,7 @@ def add_shortfall_to_tail_with_capacity(con, block_id, actual_date, qty_to_add):
                 SELECT segment_id
                 FROM production_actual
                 WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
               )
             ORDER BY segment_date DESC, end_datetime DESC, segment_id DESC
             LIMIT 1
@@ -269,6 +349,7 @@ def refresh_block_schedule_bounds(con, block_id):
                 SELECT segment_id
                 FROM production_actual
                 WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
               )
             """,
             (int(block_id),),
@@ -340,6 +421,7 @@ def apply_output_delta_to_block_tail(con, block_id, actual_date_text, delta_qty)
                 SELECT segment_id
                 FROM production_actual
                 WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
               )
             ORDER BY segment_date DESC, end_datetime DESC, segment_id DESC
             """,
@@ -503,6 +585,7 @@ def preserved_actual_bounds_for_block(con, block_id):
             FROM run_block_segment s
             LEFT JOIN production_actual a
               ON a.segment_id = s.segment_id
+             AND COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
             WHERE s.block_id = ?
               AND (
                 (
@@ -514,7 +597,8 @@ def preserved_actual_bounds_for_block(con, block_id):
                   AND s.block_id IN (
                     SELECT DISTINCT block_id
                     FROM production_actual
-                    WHERE output_qty IS NOT NULL OR reject_qty IS NOT NULL
+                    WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                      AND (output_qty IS NOT NULL OR reject_qty IS NOT NULL)
                   )
                 )
               )
@@ -540,6 +624,7 @@ def latest_actual_date_for_block(con, block_id):
             JOIN production_actual a
               ON a.segment_id = s.segment_id
             WHERE s.block_id = ?
+              AND COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
               AND (a.output_qty IS NOT NULL OR a.reject_qty IS NOT NULL)
             """,
             (int(block_id),),
@@ -619,7 +704,7 @@ def create_rework_from_reject(con, rework_source_block_id, reject_segment_id, re
         return {"created": False, "machine_id": 0}
 
     machine_id = int(first_op["machine_id"])
-    queue_position = 1 + int(
+    queue_position = 1 + float(
         one(
             con.execute(
                 "SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?",
@@ -651,7 +736,7 @@ def create_rework_from_reject(con, rework_source_block_id, reject_segment_id, re
     )
 
     operation_id = int(op_cur.lastrowid)
-    con.execute(
+    block_cur = con.execute(
         """
         INSERT INTO run_block (
           operation_id, machine_id, queue_position, scheduled_qty, include_setup, status, planning_status, execution_status,
@@ -669,10 +754,215 @@ def create_rework_from_reject(con, rework_source_block_id, reject_segment_id, re
             int(reject_segment_id),
         ),
     )
+    rework_block_id = int(block_cur.lastrowid)
+    source_actual = one(
+        con.execute(
+            """
+            SELECT actual_id
+            FROM production_actual
+            WHERE segment_id = ?
+              AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+            ORDER BY actual_id DESC
+            LIMIT 1
+            """,
+            (int(reject_segment_id),),
+        )
+    )
+    con.execute(
+        """
+        INSERT OR IGNORE INTO rework_link (
+          source_actual_id, source_block_id, rework_block_id, reject_qty, created_at
+        ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (
+            int(source_actual["actual_id"]) if source_actual else None,
+            int(rework_source_block_id),
+            rework_block_id,
+            reject_qty,
+        ),
+    )
     return {"created": True, "machine_id": machine_id}
 
 
-def recalculate_machine(con, machine_id):
+def _next_interval_after(con, machine_id, current_dt):
+    probe = current_dt.date()
+    safety = 0
+    while safety < 365:
+        safety += 1
+        intervals = machine_work_intervals_for_day(con, machine_id, probe)
+        for start_dt, end_dt in intervals:
+            if end_dt <= current_dt:
+                continue
+            if start_dt >= current_dt:
+                return start_dt, end_dt
+            if start_dt <= current_dt < end_dt:
+                return current_dt, end_dt
+        probe += timedelta(days=1)
+        current_dt = datetime.combine(probe, datetime.min.time())
+    return None, None
+
+
+def _schedule_setup_across_intervals(con, machine_id, block_id, schedule_run_id, start_dt, remaining_setup):
+    current_dt = start_dt
+    first_start = None
+    end_dt = None
+    safety = 0
+    remaining = float(remaining_setup or 0)
+    while remaining > 0 and safety < 365:
+        safety += 1
+        interval_start, interval_end = _next_interval_after(con, machine_id, current_dt)
+        if not interval_start or not interval_end:
+            break
+        if current_dt < interval_start:
+            current_dt = interval_start
+        if first_start is None:
+            first_start = current_dt
+        available = max(0.0, (interval_end - current_dt).total_seconds() / 60.0)
+        if available <= 0:
+            current_dt = interval_end
+            continue
+        use = min(remaining, available)
+        seg_end = current_dt + timedelta(minutes=use)
+        con.execute(
+            """
+            INSERT INTO run_block_segment (
+              block_id, machine_id, schedule_run_id, segment_date, segment_type, qty_done, planned_qty,
+              minutes_used, planned_minutes, segment_status, start_datetime, end_datetime, is_actual
+            ) VALUES (?, ?, ?, ?, 'setup', 0, 0, ?, ?, 'PLANNED', ?, ?, 0)
+            """,
+            (
+                int(block_id),
+                int(machine_id),
+                int(schedule_run_id),
+                date_text(current_dt.date()),
+                use,
+                use,
+                current_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                seg_end.strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        remaining -= use
+        current_dt = seg_end
+        end_dt = seg_end
+    return first_start, current_dt, end_dt, remaining
+
+
+def _schedule_production_across_intervals(con, machine_id, block, schedule_run_id, start_dt, remaining_qty, cycle_time):
+    current_dt = start_dt
+    first_start = None
+    end_dt = None
+    remaining = float(remaining_qty or 0)
+    cycle_time = max(0.0, float(cycle_time or 0))
+    safety = 0
+    while remaining > 0 and safety < 365:
+        safety += 1
+        interval_start, interval_end = _next_interval_after(con, machine_id, current_dt)
+        if not interval_start or not interval_end:
+            break
+        if current_dt < interval_start:
+            current_dt = interval_start
+        if first_start is None:
+            first_start = current_dt
+        available = max(0.0, (interval_end - current_dt).total_seconds() / 60.0)
+        if available <= 0:
+            current_dt = interval_end
+            continue
+        if cycle_time <= 0:
+            break
+        qty = min(remaining, math.floor(available / cycle_time))
+        if qty <= 0:
+            current_dt = interval_end
+            continue
+        use = qty * cycle_time
+        seg_end = current_dt + timedelta(minutes=use)
+        con.execute(
+            """
+            INSERT INTO run_block_segment (
+              block_id, machine_id, schedule_run_id, segment_date, segment_type, qty_done, planned_qty,
+              minutes_used, planned_minutes, segment_status, start_datetime, end_datetime, is_actual
+            ) VALUES (?, ?, ?, ?, 'production', ?, ?, ?, ?, 'PLANNED', ?, ?, 0)
+            """,
+            (
+                int(block["block_id"]),
+                int(machine_id),
+                int(schedule_run_id),
+                date_text(current_dt.date()),
+                qty,
+                use,
+                use,
+                use,
+                current_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                seg_end.strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        remaining -= qty
+        current_dt = seg_end
+        end_dt = seg_end
+    return first_start, current_dt, end_dt, remaining
+
+
+def _schedule_combined_production_across_intervals(con, machine_id, members, schedule_run_id, start_dt, remaining_qty):
+    current_dt = start_dt
+    first_start = None
+    end_dt = None
+    remaining = float(remaining_qty or 0)
+    combined_cycle = sum(float(member["cycle_minutes_per_qty"] or 0) for member in members)
+    safety = 0
+    while remaining > 0 and safety < 365:
+        safety += 1
+        interval_start, interval_end = _next_interval_after(con, machine_id, current_dt)
+        if not interval_start or not interval_end:
+            break
+        if current_dt < interval_start:
+            current_dt = interval_start
+        if first_start is None:
+            first_start = current_dt
+        available = max(0.0, (interval_end - current_dt).total_seconds() / 60.0)
+        if available <= 0:
+            current_dt = interval_end
+            continue
+        if combined_cycle <= 0:
+            break
+        qty = min(remaining, math.floor(available / combined_cycle))
+        if qty <= 0:
+            current_dt = interval_end
+            continue
+        group_use = qty * combined_cycle
+        seg_end = current_dt + timedelta(minutes=group_use)
+        for idx, member in enumerate(members):
+            member_cycle = max(0.0, float(member["cycle_minutes_per_qty"] or 0))
+            member_minutes = qty * member_cycle
+            member_end = current_dt + timedelta(minutes=member_minutes)
+            con.execute(
+                """
+                INSERT INTO run_block_segment (
+                  block_id, machine_id, schedule_run_id, segment_date, segment_type, qty_done, planned_qty,
+                  minutes_used, planned_minutes, segment_status, start_datetime, end_datetime, is_actual
+                ) VALUES (?, ?, ?, ?, 'production', ?, ?, ?, ?, 'PLANNED', ?, ?, 0)
+                """,
+                (
+                    int(member["block_id"]),
+                    int(machine_id),
+                    int(schedule_run_id),
+                    date_text(current_dt.date()),
+                    qty,
+                    member_minutes,
+                    member_minutes,
+                    member_minutes,
+                    current_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    member_end.strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+            if idx == len(members) - 1:
+                end_dt = seg_end
+        remaining -= qty
+        current_dt = seg_end
+    return first_start, current_dt, end_dt, remaining
+
+
+def recalculate_machine(con, machine_id, reason="PLANNER_CHANGE", schedule_run_id=None):
+    if schedule_run_id is None:
+        schedule_run_id = create_schedule_run(con, reason=reason, scope_type="MACHINE", machine_id=int(machine_id), notes=f"Recalculate machine {machine_id}")
     blocks = rows(
         con.execute(
             """
@@ -683,6 +973,7 @@ def recalculate_machine(con, machine_id):
             JOIN operation o ON o.operation_id = b.operation_id
             JOIN machines m ON m.machine_id = b.machine_id
             WHERE b.machine_id = ?
+              AND COALESCE(b.active, 1) = 1
             ORDER BY b.queue_position, b.block_id
             """,
             (int(machine_id),),
@@ -699,13 +990,15 @@ def recalculate_machine(con, machine_id):
                 SELECT segment_id
                 FROM production_actual
                 WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
               )
               AND NOT (
                 segment_type = 'setup'
                 AND block_id IN (
                   SELECT DISTINCT block_id
                   FROM production_actual
-                  WHERE output_qty IS NOT NULL OR reject_qty IS NOT NULL
+                  WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    AND (output_qty IS NOT NULL OR reject_qty IS NOT NULL)
                 )
               )
             """,
@@ -726,13 +1019,13 @@ def recalculate_machine(con, machine_id):
         else:
             queue_items.append({"members": [block], "combined": False})
     for members in combined_groups.values():
-        members.sort(key=lambda row: (int(row["queue_position"] or 0), int(row["block_id"] or 0)))
+        members.sort(key=lambda row: (float(row["queue_position"] or 0), int(row["block_id"] or 0)))
         queue_items.append({"members": members, "combined": len(members) > 1})
 
     def item_sort_key(item):
         leader = item["members"][0]
         return (
-            int(leader["queue_position"] or 0),
+            float(leader["queue_position"] or 0),
             int(leader["block_id"] or 0),
         )
 
@@ -749,10 +1042,14 @@ def recalculate_machine(con, machine_id):
     current_dt = min(start_candidates) if start_candidates else today_start
 
     def update_block_schedule_window(block_id, start_dt, end_dt, planning_status=None):
+        start_text = start_dt.strftime("%Y-%m-%d %H:%M:%S") if start_dt else ""
+        end_text = end_dt.strftime("%Y-%m-%d %H:%M:%S") if end_dt else ""
         con.execute(
             """
             UPDATE run_block
             SET calculated_start_datetime = ?, calculated_end_datetime = ?,
+                last_schedule_run_id = ?,
+                planned_qty_original = CASE WHEN COALESCE(planned_qty_original, 0) <= 0 THEN scheduled_qty ELSE planned_qty_original END,
                 planning_status = COALESCE(?, CASE
                   WHEN COALESCE(planning_status, '') = 'UNPLANNED' THEN 'PLANNED'
                   ELSE planning_status
@@ -762,12 +1059,62 @@ def recalculate_machine(con, machine_id):
             WHERE block_id = ?
             """,
             (
-                start_dt.strftime("%Y-%m-%d %H:%M:%S") if start_dt else "",
-                end_dt.strftime("%Y-%m-%d %H:%M:%S") if end_dt else "",
+                start_text,
+                end_text,
+                int(schedule_run_id) if schedule_run_id is not None else None,
                 planning_status,
                 int(block_id),
             ),
         )
+        if not start_text or not end_text:
+            upsert_schedule_alert(
+                con,
+                schedule_run_id=schedule_run_id,
+                block_id=block_id,
+                operation_id=int(block["operation_id"]),
+                ps_id=compact_text(block.get("source_ps_id")),
+                machine_id=int(machine_id),
+                alert_type="NO_CAPACITY",
+                severity="WARN",
+                message="No capacity found while recalculating.",
+                planned_at=block.get("planned_end_at") or block.get("calculated_end_datetime") or "",
+                predicted_at="",
+                delay_minutes=0,
+                status="OPEN",
+            )
+        else:
+            for alert in rows(
+                con.execute(
+                    """
+                    SELECT alert_id
+                    FROM schedule_alert
+                    WHERE block_id = ?
+                      AND alert_type = 'NO_CAPACITY'
+                      AND status IN ('OPEN', 'ACKNOWLEDGED')
+                    """,
+                    (int(block_id),),
+                )
+            ):
+                resolve_schedule_alert(con, int(alert["alert_id"]))
+            old_end = compact_text(block.get("planned_end_at") or block.get("calculated_end_datetime"))
+            if old_end and old_end != end_text:
+                upsert_schedule_alert(
+                    con,
+                    schedule_run_id=schedule_run_id,
+                    block_id=block_id,
+                    operation_id=int(block["operation_id"]),
+                    ps_id=compact_text(block.get("source_ps_id")),
+                    machine_id=int(machine_id),
+                    alert_type="PREDICTED_END_CHANGED",
+                    severity="INFO",
+                    message="Predicted end changed after recalculation.",
+                    old_value=old_end,
+                    new_value=end_text,
+                    planned_at=old_end,
+                    predicted_at=end_text,
+                    delay_minutes=0,
+                    status="OPEN",
+                )
 
     for item in queue_items:
         members = item["members"]
@@ -776,9 +1123,14 @@ def recalculate_machine(con, machine_id):
 
         if not is_combined:
             block = leader
-            anchor = parse_dt_text(block["anchor_datetime"])
-            if anchor and anchor > current_dt:
-                current_dt = anchor
+            planned_start = parse_dt_text(block["planned_start_at"]) or parse_dt_text(block["anchor_datetime"])
+            dependency_finish = dependency_finish_for_block(con, block)
+            candidate_start = current_dt
+            if dependency_finish and dependency_finish > candidate_start:
+                candidate_start = dependency_finish
+            if planned_start and candidate_start < planned_start and (int(block.get("allow_pull_forward") if block.get("allow_pull_forward") is not None else 1) == 0 or int(block.get("is_fresh_monday_item") or 0) == 1):
+                candidate_start = planned_start
+            current_dt = candidate_start
 
             actual_bounds = preserved_actual_bounds_for_block(con, int(block["block_id"]))
             if actual_bounds:
@@ -794,7 +1146,7 @@ def recalculate_machine(con, machine_id):
                 remaining_qty = max(0.0, scheduled_qty - reported_output)
                 latest_actual_date = latest_actual_date_for_block(con, int(block["block_id"]))
                 if remaining_qty > 0 and latest_actual_date:
-                    add_future_segments_after_date(con, int(block["block_id"]), latest_actual_date, remaining_qty)
+                    add_future_segments_after_date(con, int(block["block_id"]), latest_actual_date, remaining_qty, schedule_run_id=schedule_run_id)
                 refresh_block_schedule_bounds(con, int(block["block_id"]))
                 refreshed = trial_block_row(con, int(block["block_id"]))
                 refreshed_end = parse_dt_text(refreshed["calculated_end_datetime"]) if refreshed else None
@@ -816,87 +1168,44 @@ def recalculate_machine(con, machine_id):
                 remaining_qty = 0.0
             start_dt = None
             end_dt = None
-
-            safety = 0
-            while (remaining_setup > 0 or remaining_qty > 0) and safety < 365:
-                safety += 1
-                day = current_dt.date()
-                cap = capacity_minutes_for_machine_day(con, machine_id, day)
-                day_start = datetime.combine(day, datetime.min.time()).replace(
-                    hour=int(cap["start_minute"] or 0) // 60,
-                    minute=int(cap["start_minute"] or 0) % 60,
-                    second=0,
-                    microsecond=0,
+            if remaining_setup > 0:
+                setup_start, current_dt, setup_end, remaining_setup = _schedule_setup_across_intervals(
+                    con,
+                    machine_id,
+                    int(block["block_id"]),
+                    schedule_run_id,
+                    current_dt,
+                    remaining_setup,
                 )
-                day_end = day_start + timedelta(minutes=int(cap["capacity_minutes"] or 0))
-                if int(cap["capacity_minutes"] or 0) <= 0:
-                    current_dt = day_start + timedelta(days=1)
-                    continue
-                if current_dt < day_start:
-                    current_dt = day_start
-                if current_dt >= day_end:
-                    current_dt = day_start + timedelta(days=1)
-                    continue
+                start_dt = start_dt or setup_start
+                end_dt = setup_end or end_dt
+            if remaining_qty > 0 and cycle_time > 0:
+                prod_start, current_dt, prod_end, remaining_qty = _schedule_production_across_intervals(
+                    con,
+                    machine_id,
+                    block,
+                    schedule_run_id,
+                    current_dt,
+                    remaining_qty,
+                    cycle_time,
+                )
+                start_dt = start_dt or prod_start
+                end_dt = prod_end or end_dt
 
-                available = (day_end - current_dt).total_seconds() / 60.0
-                if start_dt is None:
-                    start_dt = current_dt
-
-                if remaining_setup > 0:
-                    use = min(remaining_setup, available)
-                    if use > 0:
-                        seg_end = current_dt + timedelta(minutes=use)
-                        con.execute(
-                            """
-                            INSERT INTO run_block_segment (
-                              block_id, machine_id, segment_date, segment_type, qty_done, minutes_used,
-                              start_datetime, end_datetime, is_actual
-                            ) VALUES (?, ?, ?, 'setup', 0, ?, ?, ?, 0)
-                            """,
-                            (int(block["block_id"]), int(machine_id), date_text(day), use, current_dt.strftime("%Y-%m-%d %H:%M:%S"), seg_end.strftime("%Y-%m-%d %H:%M:%S")),
-                        )
-                        current_dt = seg_end
-                        remaining_setup -= use
-                        end_dt = seg_end
-                        continue
-
-                if remaining_qty > 0 and cycle_time > 0:
-                    qty = min(remaining_qty, math.floor(available / cycle_time))
-                    if qty <= 0:
-                        current_dt = day_end
-                        continue
-                    use = qty * cycle_time
-                    seg_end = current_dt + timedelta(minutes=use)
-                    con.execute(
-                        """
-                        INSERT INTO run_block_segment (
-                          block_id, machine_id, segment_date, segment_type, qty_done, minutes_used,
-                          start_datetime, end_datetime, is_actual
-                        ) VALUES (?, ?, ?, 'production', ?, ?, ?, ?, 0)
-                        """,
-                        (int(block["block_id"]), int(machine_id), date_text(day), qty, use, current_dt.strftime("%Y-%m-%d %H:%M:%S"), seg_end.strftime("%Y-%m-%d %H:%M:%S")),
-                    )
-                    current_dt = seg_end
-                    remaining_qty -= qty
-                    end_dt = seg_end
-                    continue
-
-                current_dt = day_end
-
-            update_block_schedule_window(
-                block["block_id"],
-                start_dt,
-                end_dt,
-                None,
-            )
+            update_block_schedule_window(block["block_id"], start_dt, end_dt, None)
             continue
 
         setup_minutes = max((float(member["setup_minutes"] or 0) for member in members), default=0.0)
         combined_cycle = sum(float(member["cycle_minutes_per_qty"] or 0) for member in members)
         scheduled_qty = max((float(member["scheduled_qty"] or 0) for member in members), default=0.0)
-        leader_anchor = parse_dt_text(leader["anchor_datetime"])
-        if leader_anchor and leader_anchor > current_dt:
-            current_dt = leader_anchor
+        leader_planned_start = parse_dt_text(leader["planned_start_at"]) or parse_dt_text(leader["anchor_datetime"])
+        leader_dependency_finish = dependency_finish_for_block(con, leader)
+        candidate_start = current_dt
+        if leader_dependency_finish and leader_dependency_finish > candidate_start:
+            candidate_start = leader_dependency_finish
+        if leader_planned_start and candidate_start < leader_planned_start and (int(leader.get("allow_pull_forward") if leader.get("allow_pull_forward") is not None else 1) == 0 or int(leader.get("is_fresh_monday_item") or 0) == 1):
+            candidate_start = leader_planned_start
+        current_dt = candidate_start
 
         actual_bounds_by_block = {int(member["block_id"]): preserved_actual_bounds_for_block(con, int(member["block_id"])) for member in members}
         if any(actual_bounds_by_block.values()):
@@ -912,7 +1221,7 @@ def recalculate_machine(con, machine_id):
                 remaining_qty = max(0.0, member_scheduled_qty - reported_output)
                 latest_actual_date = latest_actual_date_for_block(con, member_id)
                 if remaining_qty > 0 and latest_actual_date:
-                    add_future_segments_after_date(con, member_id, latest_actual_date, remaining_qty)
+                    add_future_segments_after_date(con, member_id, latest_actual_date, remaining_qty, schedule_run_id=schedule_run_id)
                 refresh_block_schedule_bounds(con, member_id)
                 refreshed = trial_block_row(con, member_id)
                 refreshed_end = parse_dt_text(refreshed["calculated_end_datetime"]) if refreshed else None
@@ -925,84 +1234,28 @@ def recalculate_machine(con, machine_id):
         remaining_qty = scheduled_qty
         start_dt = None
         end_dt = None
-        safety = 0
-        while (remaining_setup > 0 or remaining_qty > 0) and safety < 365:
-            safety += 1
-            day = current_dt.date()
-            cap = capacity_minutes_for_machine_day(con, machine_id, day)
-            day_start = datetime.combine(day, datetime.min.time()).replace(
-                hour=int(cap["start_minute"] or 0) // 60,
-                minute=int(cap["start_minute"] or 0) % 60,
-                second=0,
-                microsecond=0,
+        if remaining_setup > 0:
+            setup_start, current_dt, setup_end, remaining_setup = _schedule_setup_across_intervals(
+                con,
+                machine_id,
+                int(leader["block_id"]),
+                schedule_run_id,
+                current_dt,
+                remaining_setup,
             )
-            day_end = day_start + timedelta(minutes=int(cap["capacity_minutes"] or 0))
-            if int(cap["capacity_minutes"] or 0) <= 0:
-                current_dt = day_start + timedelta(days=1)
-                continue
-            if current_dt < day_start:
-                current_dt = day_start
-            if current_dt >= day_end:
-                current_dt = day_start + timedelta(days=1)
-                continue
-
-            available = (day_end - current_dt).total_seconds() / 60.0
-            if start_dt is None:
-                start_dt = current_dt
-
-            if remaining_setup > 0:
-                use = min(remaining_setup, available)
-                if use > 0:
-                    seg_end = current_dt + timedelta(minutes=use)
-                    con.execute(
-                        """
-                        INSERT INTO run_block_segment (
-                          block_id, machine_id, segment_date, segment_type, qty_done, minutes_used,
-                          start_datetime, end_datetime, is_actual
-                        ) VALUES (?, ?, ?, 'setup', 0, ?, ?, ?, 0)
-                        """,
-                        (int(leader["block_id"]), int(machine_id), date_text(day), use, current_dt.strftime("%Y-%m-%d %H:%M:%S"), seg_end.strftime("%Y-%m-%d %H:%M:%S")),
-                    )
-                    current_dt = seg_end
-                    remaining_setup -= use
-                    end_dt = seg_end
-                    continue
-
-            if remaining_qty > 0 and combined_cycle > 0:
-                qty = min(remaining_qty, math.floor(available / combined_cycle))
-                if qty <= 0:
-                    current_dt = day_end
-                    continue
-                group_use = qty * combined_cycle
-                seg_end = current_dt + timedelta(minutes=group_use)
-                for idx, member in enumerate(members):
-                    member_cycle = max(0.0, float(member["cycle_minutes_per_qty"] or 0))
-                    member_minutes = qty * member_cycle
-                    member_end = current_dt + timedelta(minutes=member_minutes)
-                    con.execute(
-                        """
-                        INSERT INTO run_block_segment (
-                          block_id, machine_id, segment_date, segment_type, qty_done, minutes_used,
-                          start_datetime, end_datetime, is_actual
-                        ) VALUES (?, ?, ?, 'production', ?, ?, ?, ?, 0)
-                        """,
-                        (
-                            int(member["block_id"]),
-                            int(machine_id),
-                            date_text(day),
-                            qty,
-                            member_minutes,
-                            current_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                            member_end.strftime("%Y-%m-%d %H:%M:%S"),
-                        ),
-                    )
-                    if idx == 0:
-                        end_dt = seg_end
-                current_dt = seg_end
-                remaining_qty -= qty
-                continue
-
-            current_dt = day_end
+            start_dt = start_dt or setup_start
+            end_dt = setup_end or end_dt
+        if remaining_qty > 0 and combined_cycle > 0:
+            group_start, current_dt, group_end, remaining_qty = _schedule_combined_production_across_intervals(
+                con,
+                machine_id,
+                members,
+                schedule_run_id,
+                current_dt,
+                remaining_qty,
+            )
+            start_dt = start_dt or group_start
+            end_dt = group_end or end_dt
 
         for member in members[1:]:
             refresh_block_schedule_bounds(con, int(member["block_id"]))
@@ -1015,11 +1268,14 @@ def recalculate_machine(con, machine_id):
         if refreshed_end and refreshed_end > current_dt:
             current_dt = refreshed_end
 
+    refresh_states_for_machine(con, int(machine_id), schedule_run_id=schedule_run_id)
+
 
 def recalculate_all(con):
     machine_ids = [row["machine_id"] for row in rows(con.execute("SELECT machine_id FROM machines WHERE active = 1 ORDER BY machine_id"))]
+    schedule_run_id = create_schedule_run(con, reason="MANUAL_RECALCULATE", scope_type="FULL", machine_id=None, notes="Recalculate all machines")
     for machine_id in machine_ids:
-        recalculate_machine(con, machine_id)
+        recalculate_machine(con, machine_id, reason="MANUAL_RECALCULATE", schedule_run_id=schedule_run_id)
 
 
 def refresh_block_group_label(con, group_id):

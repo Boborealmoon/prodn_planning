@@ -72,8 +72,10 @@ def _block_metrics_for_ps_ids(con, ps_ids):
                     block_id,
                     COALESCE(SUM(COALESCE(output_qty, 0)), 0) AS output_qty,
                     COALESCE(SUM(COALESCE(reject_qty, 0)), 0) AS reject_qty,
+                    COALESCE(SUM(COALESCE(output_qty, 0) - COALESCE(reject_qty, 0)), 0) AS good_qty,
                     COUNT(actual_id) AS actual_report_count
                 FROM production_actual
+                WHERE COALESCE(status, 'ACTIVE') = 'ACTIVE'
                 GROUP BY block_id
             ),
             segment_bounds AS (
@@ -89,17 +91,19 @@ def _block_metrics_for_ps_ids(con, ps_ids):
                    b.scheduled_qty, b.status, b.planning_status, b.execution_status,
                    b.calculated_start_datetime, b.calculated_end_datetime,
                    b.anchor_datetime, b.remarks, m.machine_code,
-                   COALESCE(ab.output_qty, 0) AS output_qty,
-                   COALESCE(ab.reject_qty, 0) AS reject_qty,
-                   COALESCE(ab.actual_report_count, 0) AS actual_report_count,
-                   sb.expected_start,
-                   sb.expected_end
+                    COALESCE(ab.output_qty, 0) AS output_qty,
+                    COALESCE(ab.reject_qty, 0) AS reject_qty,
+                    COALESCE(ab.good_qty, 0) AS good_qty,
+                    COALESCE(ab.actual_report_count, 0) AS actual_report_count,
+                    sb.expected_start,
+                    sb.expected_end
             FROM operation o
             JOIN run_block b ON b.operation_id = o.operation_id
             LEFT JOIN machines m ON m.machine_id = b.machine_id
             LEFT JOIN actual_by_block ab ON ab.block_id = b.block_id
             LEFT JOIN segment_bounds sb ON sb.block_id = b.block_id
             WHERE o.source_ps_id IN ({placeholders})
+              AND COALESCE(b.active, 1) = 1
               AND COALESCE(b.block_type, 'ORIGINAL') <> 'REWORK'
             ORDER BY o.source_ps_id, o.source_op_seq_id, o.source_op_no, b.queue_position, b.block_id
             """,
@@ -135,9 +139,10 @@ def _block_metrics_for_ps_ids(con, ps_ids):
         scheduled_qty = _to_float(item["scheduled_qty"])
         output_qty = _to_float(item["output_qty"])
         reject_qty = _to_float(item["reject_qty"])
+        good_qty = _to_float(item["good_qty"])
         actual_report_count = int(item.get("actual_report_count") or 0)
         op_entry["planned_qty"] += scheduled_qty
-        op_entry["finished_qty"] += output_qty
+        op_entry["finished_qty"] += good_qty
         op_entry["reject_qty"] += reject_qty
         op_entry["actual_report_count"] += actual_report_count
         op_entry["block_count"] += 1
@@ -428,6 +433,7 @@ def api_process_sheet_details(ps_id):
                 JOIN run_block b ON b.block_id = a.block_id
                 JOIN operation o ON o.operation_id = b.operation_id
                 WHERE o.source_ps_id = ?
+                  AND COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
                 ORDER BY a.report_date, a.actual_id
                 """,
                 (ps_id,),

@@ -17,6 +17,7 @@ def trial_catalog_items(con, include_completed=False):
             FROM operation o
             JOIN run_block b ON b.operation_id = o.operation_id
             WHERE COALESCE(o.source_ps_id, '') <> ''
+              AND COALESCE(b.active, 1) = 1
               AND COALESCE(b.block_type, 'ORIGINAL') <> 'REWORK'
             GROUP BY o.source_ps_id, o.source_op_no, o.source_op_seq_id
             """
@@ -316,7 +317,7 @@ def combined_group_summary(con, group_id):
                 "block_id": int(block["block_id"]),
                 "operation_id": int(block["operation_id"]),
                 "machine_id": int(block["machine_id"]),
-                "queue_position": int(block["queue_position"] or 0),
+                "queue_position": float(block["queue_position"] or 0),
                 "job_no": block["job_no"] or "",
                 "operation_name": block["operation_name"] or "",
                 "source_op_no": block["source_op_no"] or "",
@@ -343,15 +344,15 @@ def combined_group_summary(con, group_id):
     target_qty = max((row["scheduled_qty"] for row in member_rows), default=0.0)
     max_setup = max((row["setup_minutes"] for row in member_rows), default=0.0)
     cycle_sum = sum(row["cycle_minutes_per_qty"] for row in member_rows)
-    actual_good_qty = sum(row["output_qty"] for row in member_rows)
+    actual_good_qty = sum(row["valid_done_qty"] for row in member_rows)
     actual_reject_qty = sum(row["reject_qty"] for row in member_rows)
-    paired_output_qty = min((row["valid_done_qty"] for row in member_rows), default=0.0)
-    remaining_qty = max(0.0, target_qty - paired_output_qty)
+    paired_good_qty = min((row["valid_done_qty"] for row in member_rows), default=0.0)
+    remaining_qty = max(0.0, target_qty - paired_good_qty)
     remaining_minutes = remaining_qty * cycle_sum
     for row in member_rows:
         row["member_net_output"] = row["valid_done_qty"]
-        row["paired_excess_qty"] = max(0.0, row["valid_done_qty"] - paired_output_qty)
-        row["paired_shortfall_qty"] = max(0.0, paired_output_qty - row["valid_done_qty"])
+        row["paired_excess_qty"] = max(0.0, row["valid_done_qty"] - paired_good_qty)
+        row["paired_shortfall_qty"] = max(0.0, paired_good_qty - row["valid_done_qty"])
     starts = [row["calculated_start_datetime"] for row in member_rows if compact_text(row["calculated_start_datetime"])]
     ends = [row["calculated_end_datetime"] for row in member_rows if compact_text(row["calculated_end_datetime"])]
     status_values = [compact_text(row["execution_status"] or row["status"]).upper() for row in member_rows]
@@ -730,7 +731,7 @@ def schedule_planning_card(con, card_id, machine_id, queue_position=0):
         (group_label,),
     )
     group_id = int(group_cur.lastrowid)
-    max_position = int(
+    max_position = float(
         one(
             con.execute(
                 "SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?",
@@ -807,7 +808,7 @@ def schedule_planning_card(con, card_id, machine_id, queue_position=0):
             (
                 operation_id,
                 machine_id,
-                queue_position + idx - 1,
+                float(queue_position) + idx - 1,
                 float(card["target_qty"] or 0),
                 1,
                 group_id,

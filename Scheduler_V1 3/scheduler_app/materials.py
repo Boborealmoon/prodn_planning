@@ -392,6 +392,7 @@ def material_ps_summary_map(con):
             JOIN operation o ON o.operation_id = b.operation_id
             JOIN machines m ON m.machine_id = b.machine_id
             WHERE COALESCE(o.source_ps_id, '') <> ''
+              AND COALESCE(b.active, 1) = 1
             ORDER BY b.calculated_start_datetime, b.queue_position, b.block_id
             """
         )
