@@ -20,9 +20,8 @@ TRIAL_MACHINES = [
 ]
 
 CAPACITY_PROFILES = [
-    ("NORMAL_DAY_NIGHT", 630, 510, "Day + night coverage"),
-    ("SATURDAY", 420, 510, "Saturday shift"),
+    ("NORMAL_DAY_NIGHT", 630, 510, "Weekday shift 08:30-20:00"),
+    ("SATURDAY", 420, 510, "Saturday shift 08:30-16:15"),
     ("FULL_24H", 1440, 0, "24 hour coverage"),
     ("OFF", 0, 0, "Off"),
 ]
-

@@ -1121,6 +1121,50 @@ function trialMachineCategories() {
   return ['ALL', ...Array.from(categories).sort()];
 }
 
+function trialTodayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function trialAddDaysISO(dateText, deltaDays) {
+  if (!dateText) return '';
+  const base = new Date(`${String(dateText).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return '';
+  base.setDate(base.getDate() + Number(deltaDays || 0));
+  const y = base.getFullYear();
+  const m = String(base.getMonth() + 1).padStart(2, '0');
+  const d = String(base.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function trialNormalizeScheduleDates(startText, endText) {
+  const today = trialTodayISO();
+  let start = String(startText || '').trim() || today;
+  let end = String(endText || '').trim();
+  if (end && end < start) end = start;
+  return { start, end };
+}
+
+function trialResolvedScheduleDateFilterFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const urlStart = String(params.get('start') || params.get('from') || '').trim();
+  const urlEnd = String(params.get('end') || params.get('to') || '').trim();
+  return trialNormalizeScheduleDates(urlStart, urlEnd);
+}
+
+function trialSyncScheduleUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const resolvedStart = String(trialScheduleDateFilter.start || '').trim();
+  const resolvedEnd = String(trialScheduleDateFilter.end || '').trim();
+  if (resolvedStart) params.set('start', resolvedStart); else params.delete('start');
+  if (resolvedEnd) params.set('end', resolvedEnd); else params.delete('end');
+  const nextUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState({}, '', nextUrl);
+}
+
 function renderTrialMachineCategoryFilter() {
   const categories = trialMachineCategories();
   return `
@@ -1245,11 +1289,14 @@ function renderTrialScheduleDateFilter() {
 function setTrialScheduleDateFilter(field, value) {
   if (field !== 'start' && field !== 'end') return;
   trialScheduleDateFilter[field] = String(value || '');
+  trialScheduleDateFilter = trialNormalizeScheduleDates(trialScheduleDateFilter.start, trialScheduleDateFilter.end);
+  trialSyncScheduleUrl();
   renderTrial();
 }
 
 function clearTrialScheduleDateFilter() {
   trialScheduleDateFilter = { start: '', end: '' };
+  trialSyncScheduleUrl();
   renderTrial();
 }
 
@@ -1876,7 +1923,10 @@ function renderTrial() {
 }
 
 async function loadTrial() {
-  const data = await GET(`/api/trial/schedule?include_completed=${trialShowCompleted ? 1 : 0}`);
+  const resolved = trialNormalizeScheduleDates(trialScheduleDateFilter.start, trialScheduleDateFilter.end);
+  trialScheduleDateFilter = resolved;
+  trialSyncScheduleUrl();
+  const data = await GET(`/api/trial/schedule?include_completed=${trialShowCompleted ? 1 : 0}&start=${encodeURIComponent(resolved.start)}&end=${encodeURIComponent(resolved.end)}`);
   trialState = {
     machines: data.machines || [],
     blocks: data.blocks || [],
@@ -2216,24 +2266,22 @@ async function saveTrialBOMEditor(psId) {
 
 function trialFlowSelectHtml(ps) {
   const flows = Array.isArray(ps.flow_options) ? ps.flow_options : [];
-  const selectedFlowId = Number(ps.selected_bom_id || 0);
-  const selectedFlowCode = String(ps.selected_flow_code || '');
+  const selectedFlowCode = String(ps.selected_bom_code || ps.selected_flow_code || '');
   const options = [];
   if (!flows.length) {
-    options.push('<option value="">No flow available</option>');
+    options.push('<option value="">No BOM code available</option>');
   } else {
-    options.push('<option value="">Select flow</option>');
+    options.push('<option value="">Select BOM code</option>');
     flows.forEach(flow => {
-      const flowId = Number(flow.bom_id || 0);
-      const code = String(flow.flow_code || `FLOW-${flowId}`);
+      const code = String(flow.bom_code || flow.flow_code || '');
       const label = `${code}${flow.is_default ? ' (default)' : ''}`;
-      options.push(`<option value="${escapeHtml(String(flowId))}" ${flowId === selectedFlowId ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+      options.push(`<option value="${escapeHtml(code)}" ${code === selectedFlowCode ? 'selected' : ''}>${escapeHtml(label)}</option>`);
     });
   }
-  const label = selectedFlowCode || (flows.find(flow => Number(flow.bom_id || 0) === selectedFlowId)?.flow_code || '');
+  const label = selectedFlowCode || '';
   return `
     <label style="display:grid;gap:4px;justify-items:end">
-      <span class="trial-catalog-section-note">Flow code${label ? ` · ${escapeHtml(label)}` : ''}</span>
+      <span class="trial-catalog-section-note">BOM Code${label ? ` · ${escapeHtml(label)}` : ''}</span>
       <select class="trial-catalog-flow-select" data-ps-id="${escapeHtml(ps.ps_id || '')}" ${flows.length ? '' : 'disabled'} onchange="setTrialSelectedFlow(this.dataset.psId, this.value)">
         ${options.join('')}
       </select>
@@ -2252,11 +2300,12 @@ function trialOpQtyLabel(op) {
   return `Qty ${fmt(remaining, 0)}`;
 }
 
-async function setTrialSelectedFlow(psId, flowId) {
-  if (!Number(flowId || 0)) return;
+async function setTrialSelectedFlow(psId, flowCode) {
+  const code = String(flowCode || '').trim();
+  if (!code) return;
   try {
     await PUT(`/api/trial/process-sheets/${encodeURIComponent(psId)}/flow`, {
-      bom_id: Number(flowId || 0),
+      flow_code: code,
     });
     await loadTrial();
     toast(`Flow updated for ${psId}`, 'success');

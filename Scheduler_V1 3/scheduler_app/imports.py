@@ -289,12 +289,6 @@ def sync_operations_for_flow(con, bom_id):
         )
     }
     return {machine_id for machine_id in affected_machine_ids if machine_id}
-
-
-def sync_operations_for_flow(con, bom_id):
-    return sync_operations_for_flow(con, bom_id)
-
-
 def trial_import_workbook(con, file_storage):
     workbook_data = load_trial_workbook(file_storage)
     workbook_name = compact_text(getattr(file_storage, "filename", "")) or "workbook.xlsx"

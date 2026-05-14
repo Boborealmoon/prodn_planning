@@ -120,6 +120,16 @@ def ensure_db():
                         """,
                         (profile_name, capacity_minutes, start_minute, note),
                     )
+                else:
+                    con.execute(
+                        """
+                        UPDATE capacity_profile
+                        SET capacity_minutes = ?, start_minute = ?, note = ?
+                        WHERE profile_name = ?
+                          AND (capacity_minutes <> ? OR start_minute <> ? OR COALESCE(note, '') <> COALESCE(?, ''))
+                        """,
+                        (capacity_minutes, start_minute, note, profile_name, capacity_minutes, start_minute, note),
+                    )
 
         if table_columns(con, "machines"):
             existing_machines = {row["machine_code"] for row in rows(con.execute("SELECT machine_code FROM machines"))}

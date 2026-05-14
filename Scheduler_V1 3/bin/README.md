@@ -10,12 +10,12 @@ Uses Python (Flask) + SQLite. No cloud, no EXE, no heavy dependencies.
 ```
 production_planner/
 ├── app.py                  # Main Flask application + scheduling engine
-├── schema.sql              # SQLite database schema
+├── scheduler_app/schema.sql # SQLite database schema used by the app
 ├── seed_demo.sql           # Demo/mock data
 ├── requirements.txt        # Python dependencies (just Flask)
 ├── planner.db              # SQLite database (created on first run)
 │
-├── templates/              # HTML page templates
+├── scheduler_app/templates/ # Active HTML page templates
 │   ├── base.html           # Shared layout / sidebar
 │   ├── process_sheets.html # Main working page
 │   ├── parts_flows.html    # Routing master data

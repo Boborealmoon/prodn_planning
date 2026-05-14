@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/main.css">
+    {% block head_extra %}{% endblock %}
 </head>
 <body>
 <nav class="topbar">
@@ -23,7 +24,7 @@
             <a href="/planner" class="topnav-link {% if request.path in ['/planner', '/trial'] %}active{% endif %}">Planner</a>
             <a href="/process-sheets" class="topnav-link {% if request.path == '/process-sheets' %}active{% endif %}">Process Sheets</a>
             <a href="/gantt" class="topnav-link {% if request.path == '/gantt' %}active{% endif %}">Gantt</a>
-            <a href="/summary" class="topnav-link {% if request.path == '/summary' %}active{% endif %}">Legacy Summary</a>
+            <a href="/summary" class="topnav-link {% if request.path == '/summary' %}active{% endif %}">Summary</a>
             <span class="topnav-separator"></span>
 
             {% set data_active = request.path in ['/parts-flows', '/program-toollist', '/machines', '/materials', '/legacy-materials', '/data-management'] %}

@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from flask import Blueprint, jsonify, request
 
 from ..db import db, one, rows, parse_dt_text
-from ..machines import fetch_machines, machine_capacity_for_date
+from ..machines import fetch_machines, gantt_off_time_blocks, machine_capacity_for_date
 from ..visual_time import break_windows_for_date, visual_timing_for_segment
 from ..utils import compact_text
 
@@ -78,6 +78,7 @@ def api_trial_gantt():
         machine_by_id = {int(machine.get("machine_id") or 0): machine for machine in machines}
         calendar = _calendar_rows(con, start_iso, end_iso, machines)
         dates = [row["work_date"] for row in calendar]
+        off_time_blocks = gantt_off_time_blocks(machines, dates, con)
         break_windows = [
             {
                 "work_date": work_date,
@@ -332,6 +333,7 @@ def api_trial_gantt():
                 "machines": machines,
                 "calendar": calendar,
                 "break_windows": break_windows,
+                "off_time_blocks": off_time_blocks,
                 "blocks": payload_blocks,
             }
         )

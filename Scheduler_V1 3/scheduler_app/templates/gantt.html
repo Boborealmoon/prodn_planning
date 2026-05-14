@@ -230,15 +230,71 @@
     pointer-events: none;
     z-index: 1;
   }
-  #gantt-container .gantt-break-band {
+  #gantt-container .gantt-off-time-band {
     position: absolute;
     left: 0;
     right: 0;
-    background: rgba(100,116,139,0.20);
-    border-top: 1px dashed rgba(100,116,139,0.28);
-    border-bottom: 1px dashed rgba(100,116,139,0.28);
-    pointer-events: none;
-    z-index: 2;
+    pointer-events: auto;
+    cursor: default;
+    z-index: 1;
+  }
+  #gantt-container .gantt-off-time-off_shift {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(148,163,184,0.18) 0,
+        rgba(148,163,184,0.18) 8px,
+        rgba(100,116,139,0.10) 8px,
+        rgba(100,116,139,0.10) 16px
+      ),
+      rgba(100,116,139,0.12);
+    border-top: 1px solid rgba(100,116,139,0.18);
+    border-bottom: 1px solid rgba(100,116,139,0.18);
+  }
+  #gantt-container .gantt-off-time-lunch {
+    position: absolute;
+    background:
+      repeating-linear-gradient(
+        45deg,
+        rgba(234,179,8,0.18) 0,
+        rgba(234,179,8,0.18) 6px,
+        rgba(217,119,6,0.08) 6px,
+        rgba(217,119,6,0.08) 12px
+      ),
+      rgba(234,179,8,0.10);
+    border-top: 1px dashed rgba(234,179,8,0.28);
+    border-bottom: 1px dashed rgba(234,179,8,0.28);
+  }
+  #gantt-container .gantt-off-time-coffee {
+    background:
+      linear-gradient(135deg, rgba(59,130,246,0.18), rgba(99,102,241,0.08)),
+      repeating-linear-gradient(
+        90deg,
+        rgba(99,102,241,0.12) 0,
+        rgba(99,102,241,0.12) 4px,
+        rgba(99,102,241,0.02) 4px,
+        rgba(99,102,241,0.02) 8px
+      );
+    border-top: 1px dashed rgba(99,102,241,0.28);
+    border-bottom: 1px dashed rgba(99,102,241,0.28);
+  }
+  #gantt-container .gantt-off-time-sunday {
+    background: rgba(71,85,105,0.22);
+    border-top: 1px solid rgba(71,85,105,0.30);
+    border-bottom: 1px solid rgba(71,85,105,0.30);
+  }
+  #gantt-container .gantt-off-time-override {
+    background:
+      repeating-linear-gradient(
+        135deg,
+        rgba(239,68,68,0.18) 0,
+        rgba(239,68,68,0.18) 8px,
+        rgba(100,116,139,0.10) 8px,
+        rgba(100,116,139,0.10) 16px
+      ),
+      rgba(239,68,68,0.10);
+    border-top: 1px solid rgba(239,68,68,0.22);
+    border-bottom: 1px solid rgba(239,68,68,0.22);
   }
   #gantt-container .gantt-setup-section {
     position: absolute;
@@ -336,7 +392,11 @@
     <span><span style="background:rgba(34,197,94,0.78);border:1px solid rgba(34,197,94,1);"></span> Actual reported</span>
     <span><span style="background:rgba(16,185,129,0.88);border:1px solid rgba(16,185,129,1);"></span> Completed</span>
     <span><span style="background:rgba(239,68,68,0.82);"></span> Rework</span>
-    <span><span style="background:rgba(100,116,139,0.15);border:1px solid var(--border);"></span> Off hours / non-working</span>
+    <span><span style="background:rgba(100,116,139,0.15);border:1px solid var(--border);"></span> Off shift</span>
+    <span><span style="background:rgba(234,179,8,0.16);border:1px dashed rgba(234,179,8,0.55);"></span> Lunch break</span>
+    <span><span style="background:rgba(99,102,241,0.14);border:1px dashed rgba(99,102,241,0.55);"></span> Coffee break</span>
+    <span><span style="background:rgba(71,85,105,0.22);border:1px solid rgba(71,85,105,0.55);"></span> Sunday off</span>
+    <span><span style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);"></span> Capacity override</span>
     <span style="margin-left:auto;color:var(--text3);background:transparent;border:none;">Click block for details</span>
   </div>
   <div id="gantt-container">
@@ -374,6 +434,7 @@ let ganttLoadedDates = [];
 let ganttLoadedBlocksBySegmentId = {};
 let ganttLoadedMachines = [];
 let ganttLoadedCalendarByDate = {};
+let ganttLoadedOffTimeBlocksByKey = {};
 let ganttIsLoadingMore = false;
 let ganttAnchorDate = localISODate();
 let ganttLoadToken = 0;
@@ -615,6 +676,7 @@ function buildGanttCalendarArray() {
 
 function rebuildGanttTrialDataCache() {
   const blocks = Object.values(ganttLoadedBlocksBySegmentId);
+  const offTimeBlocks = Object.values(ganttLoadedOffTimeBlocksByKey);
   blocks.sort((a, b) => (
     String(a.plan_date || '').localeCompare(String(b.plan_date || ''))
   ) || (
@@ -625,6 +687,15 @@ function rebuildGanttTrialDataCache() {
     Number(a.block_id || 0) - Number(b.block_id || 0)
   ) || (
     Number(a.segment_id || 0) - Number(b.segment_id || 0)
+  ));
+  offTimeBlocks.sort((a, b) => (
+    String(a.date || '').localeCompare(String(b.date || ''))
+  ) || (
+    Number(a.machine_id || 0) - Number(b.machine_id || 0)
+  ) || (
+    Number(a.start_min || 0) - Number(b.start_min || 0)
+  ) || (
+    Number(a.end_min || 0) - Number(b.end_min || 0)
   ));
   ganttLoadedDates = Array.from(new Set(ganttLoadedDates)).sort(compareISODate);
   ganttLoadedMachines = Object.values(ganttLoadedMachines.reduce((acc, machine) => {
@@ -639,6 +710,7 @@ function rebuildGanttTrialDataCache() {
     dates: ganttLoadedDates.slice(),
     machines: ganttLoadedMachines.slice(),
     calendar: buildGanttCalendarArray(),
+    off_time_blocks: offTimeBlocks,
     blocks,
   };
   ganttTrialDataCache.display_blocks = buildGanttDisplayBlocks(ganttTrialDataCache.blocks);
@@ -650,12 +722,14 @@ function mergeGanttPayload(payload, { replace = false } = {}) {
   const incomingDates = Array.isArray(payload?.dates) ? payload.dates.map(String).filter(Boolean) : [];
   const incomingMachines = Array.isArray(payload?.machines) ? payload.machines : [];
   const incomingCalendar = Array.isArray(payload?.calendar) ? payload.calendar : [];
+  const incomingOffTimeBlocks = Array.isArray(payload?.off_time_blocks) ? payload.off_time_blocks : [];
   const incomingBlocks = Array.isArray(payload?.blocks) ? payload.blocks : [];
   if (replace) {
     ganttLoadedDates = [];
     ganttLoadedBlocksBySegmentId = {};
     ganttLoadedMachines = [];
     ganttLoadedCalendarByDate = {};
+    ganttLoadedOffTimeBlocksByKey = {};
     ganttLoadedStart = '';
     ganttLoadedEnd = '';
   }
@@ -681,6 +755,15 @@ function mergeGanttPayload(payload, { replace = false } = {}) {
     const segmentId = String(block.segment_id || '').trim();
     const blockKey = segmentId || `${block.block_id || ''}|${block.machine_id || ''}|${block.plan_date || ''}|${block.source_op_seq_id || ''}`;
     ganttLoadedBlocksBySegmentId[blockKey] = { ...(ganttLoadedBlocksBySegmentId[blockKey] || {}), ...block };
+  });
+  incomingOffTimeBlocks.forEach(block => {
+    const machineId = String(block.machine_id || '').trim();
+    const workDate = String(block.date || '').trim();
+    const startMin = String(block.start_min ?? block.startMinute ?? 0).trim();
+    const endMin = String(block.end_min ?? block.endMinute ?? 0).trim();
+    const kind = String(block.kind || '').trim();
+    const key = `${machineId}|${workDate}|${startMin}|${endMin}|${kind}|${String(block.reason || '').trim()}`;
+    ganttLoadedOffTimeBlocksByKey[key] = { ...(ganttLoadedOffTimeBlocksByKey[key] || {}), ...block };
   });
   if (incomingDates.length) {
     const minDate = incomingDates.reduce((minValue, workDate) => (!minValue || compareISODate(workDate, minValue) < 0 ? workDate : minValue), ganttLoadedStart || incomingDates[0]);
@@ -712,12 +795,17 @@ function isWeekdayMonToFri(dateText) {
   return day >= 1 && day <= 5;
 }
 
-function ganttOffWorkBandsForMachine(machine) {
-  if (!machine || is24HrProfile(machine.shift_profile)) return [];
-  return [
-    { kind: 'offwork', startMinute: 0, endMinute: 510 },
-    { kind: 'offwork', startMinute: 1200, endMinute: 1440 },
-  ];
+function ganttOffTimeBlocksForMachineDate(dateText, machine, offTimeBlocks) {
+  const workDate = String(dateText || '').trim();
+  const machineId = String(machine && machine.machine_id ? machine.machine_id : '').trim();
+  if (!workDate || !machineId) return [];
+  return (Array.isArray(offTimeBlocks) ? offTimeBlocks : [])
+    .filter(block => String(block.machine_id || '') === machineId && String(block.date || '') === workDate)
+    .sort((a, b) => (
+      Number(a.start_min || 0) - Number(b.start_min || 0)
+    ) || (
+      Number(a.end_min || 0) - Number(b.end_min || 0)
+    ));
 }
 
 function ganttBreakBandsForDateMachine(dateText, machine) {
@@ -985,20 +1073,7 @@ function buildGanttDisplayBlocks(rawSegments) {
 }
 
 function cellBreakBands(dateText, machine, scale) {
-  const bands = [
-    ...ganttOffWorkBandsForMachine(machine),
-    ...ganttBreakBandsForDateMachine(dateText, machine),
-  ];
-  return bands.map(band => {
-    const startMin = Number(band.startMinute || 0);
-    const endMin = Number(band.endMinute || 0);
-    const top = scale.minuteToY(Math.max(startMin, DAY_START));
-    const height = Math.max(0, scale.minuteToY(Math.min(endMin, DAY_END)) - top);
-    if (height <= 0) return '';
-    const className = band.kind === 'offwork' ? 'gantt-offwork-band' : 'gantt-break-band';
-    const compactStyle = band.kind === 'offwork' && scale.mode === 'compact' ? 'background:rgba(100,116,139,0.18);' : '';
-    return `<div class="${className}" style="top:${top}px;height:${height}px;${compactStyle}"></div>`;
-  }).join('');
+  return '';
 }
 
 function blockStyle(block) {
@@ -1335,6 +1410,7 @@ function renderGantt(data) {
     ? data.blocks.filter(block => ganttSelectedMachineType === 'all' || String(machineTypeById[String(block.machine_id)] || '') === String(ganttSelectedMachineType))
     : [];
   const dates = Array.isArray(data.dates) ? data.dates : [];
+  const offTimeBlocks = Array.isArray(data.off_time_blocks) ? data.off_time_blocks : [];
   const calMap = {};
   (Array.isArray(data.calendar) ? data.calendar : []).forEach(c => { calMap[c.work_date] = c; });
   const displayBlocks = buildGanttDisplayBlocks(blocks).sort((a, b) => (
@@ -1344,7 +1420,7 @@ function renderGantt(data) {
   ) || (
     Number(a.block_id || 0) - Number(b.block_id || 0)
   ));
-  ganttTrialDataCache.display_blocks = displayBlocks;
+  if (ganttTrialDataCache) ganttTrialDataCache.display_blocks = displayBlocks;
   const blockPieceCounts = displayBlocks.reduce((acc, block) => {
     const key = String(block.block_id || '');
     if (!key) return acc;
@@ -1402,12 +1478,13 @@ function renderGantt(data) {
     for (const machine of machines) {
       const dayBlocks = displayBlocks.filter(block => String(block.machine_id || '') === String(machine.machine_id || '') && String(block.plan_date || '') === String(d || ''));
       html += `<div data-gantt-date="${escapeHtml(d)}" data-machine-id-col="${machine.machine_id}" data-date-drop="${d}" style="width:${machineWidth}px;flex-shrink:0;height:${scale.rowHeight}px;position:relative;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${!isWorkingDay ? 'rgba(239,68,68,0.05)' : (isSelectedDate ? 'rgba(59,130,246,0.03)' : 'transparent')}">`;
-      ganttOffWorkBandsForMachine(machine).forEach(band => {
-        const top = scale.minuteToY(band.startMinute);
-        const height = Math.max(0, scale.minuteToY(band.endMinute) - top);
+      ganttOffTimeBlocksForMachineDate(d, machine, offTimeBlocks).forEach(block => {
+        const top = scale.minuteToY(Number(block.start_min || 0));
+        const height = Math.max(0, scale.minuteToY(Number(block.end_min || 0)) - top);
         if (height > 0) {
-          const compactStyle = scale.mode === 'compact' ? 'background:rgba(100,116,139,0.18);' : '';
-          html += `<div class="gantt-offwork-band" style="top:${top}px;height:${height}px;${compactStyle}"></div>`;
+          const kind = String(block.kind || 'off_shift').trim() || 'off_shift';
+          const title = String(block.title || '').trim() || `${kind}: ${minuteText(block.start_min)}-${minuteText(block.end_min)}`;
+          html += `<div class="gantt-off-time-band gantt-off-time-${escapeHtml(kind)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" style="top:${top}px;height:${height}px"></div>`;
         }
       });
       scale.amPmBands.forEach(band => {
@@ -1424,8 +1501,6 @@ function renderGantt(data) {
         const noonTop = scale.minuteToY(720);
         html += `<div style="position:absolute;left:0;right:0;top:${noonTop}px;height:1px;background:rgba(15,23,42,0.12);pointer-events:none;z-index:1"></div>`;
       }
-      html += cellBreakBands(d, machine, scale);
-
       for (const block of dayBlocks) {
         const startMin = Math.max(DAY_START, Math.min(DAY_END, ganttDisplayStartMin(block)));
         const endMin = Math.max(startMin + 1, Math.max(DAY_START, Math.min(DAY_END, ganttDisplayEndMin(block))));
@@ -1438,14 +1513,6 @@ function renderGantt(data) {
         const setupEndMin = Number(block.setup_visual_end_min != null ? block.setup_visual_end_min : block.visual_start_min || startMin);
         const setupTop = block.has_setup ? Math.max(0, scale.minuteToY(Math.max(DAY_START, Math.min(DAY_END, setupStartMin))) - top) : 0;
         const setupHeight = block.has_setup ? Math.max(0, scale.minuteToY(Math.max(DAY_START, Math.min(DAY_END, setupEndMin))) - scale.minuteToY(Math.max(DAY_START, Math.min(DAY_END, setupStartMin)))) : 0;
-        if (String(block.start_datetime || '') !== String(block.visual_start_datetime || '') || String(block.end_datetime || '') !== String(block.visual_end_datetime || '')) {
-          console.debug('[gantt visual]', block.block_id, {
-            stored_start: block.start_datetime,
-            stored_end: block.end_datetime,
-            visual_start: ganttDisplayStartDateTime(block),
-            visual_end: ganttDisplayEndDateTime(block),
-          });
-        }
         const blockId = String(block.block_id || 0);
         const pieceIndex = (blockPieceOrder[blockId] || 0) + 1;
         blockPieceOrder[blockId] = pieceIndex;

@@ -194,10 +194,9 @@ def sync_material_requirements_for_ps(con, ps_id):
               expected_ready_date,
               supplier_ref,
               remarks,
-              ,
               updated_at,
               created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_CONFIRMATION', '', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_CONFIRMATION', '', '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 ps_id,

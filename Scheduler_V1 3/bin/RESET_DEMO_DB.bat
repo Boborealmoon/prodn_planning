@@ -24,7 +24,7 @@ python -c "
 import sqlite3, os
 db = sqlite3.connect('planner.db')
 db.execute('PRAGMA foreign_keys = ON')
-with open('schema.sql') as f:
+with open(r'..\scheduler_app\schema.sql', encoding='utf-8') as f:
     db.executescript(f.read())
 with open('seed_demo.sql') as f:
     db.executescript(f.read())
