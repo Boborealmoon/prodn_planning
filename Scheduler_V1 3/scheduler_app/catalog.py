@@ -4,6 +4,7 @@ from .actuals import actual_totals_for_block
 from .blocks import trial_block_row
 from .db import one, rows
 from .imports import trial_catalog_op_key
+from .materials import material_status_map_for_ps_ids
 from .utils import compact_text, parse_number
 
 
@@ -114,6 +115,7 @@ def trial_catalog_items(con, include_completed=False):
     planned = []
     planning_cards_map = planning_cards_by_ps(con)
     covered_map = planning_card_covered_op_keys(con)
+    material_status_map = material_status_map_for_ps_ids(con, grouped.keys())
 
     def flow_options_for_part(part_id):
         part_id = int(part_id or 0)
@@ -190,6 +192,12 @@ def trial_catalog_items(con, include_completed=False):
             )
 
         item["op_cards"] = op_cards
+        item["material_status"] = material_status_map.get(ps_id, {
+            "status": "NOT_REQUIRED",
+            "label": "",
+            "expected_ready_date": "",
+            "severity": "none",
+        })
         if not item["selected_bom_code"] and item["selected_bom_id"]:
             item["selected_bom_code"] = next(
                 (flow["bom_code"] for flow in item["flow_options"] if int(flow["bom_id"]) == int(item["selected_bom_id"])),
@@ -211,6 +219,7 @@ def trial_catalog_items(con, include_completed=False):
                     "planner_status": item["planner_status"],
                     "selected_bom_id": item["selected_bom_id"],
                     "selected_bom_code": item["selected_bom_code"],
+                    "material_status": item["material_status"],
                     "flow_options": item["flow_options"],
                     "planning_cards": item["planning_cards"],
                     "op_cards": item["op_cards"],
@@ -234,6 +243,12 @@ def trial_catalog_items(con, include_completed=False):
                 "planner_status": row["planner_status"] or "",
                 "selected_bom_id": int(row["selected_bom_id"] or 0),
                 "selected_bom_code": row["selected_bom_code"] or "",
+                "material_status": material_status_map.get(ps_id, {
+                    "status": "NOT_REQUIRED",
+                    "label": "",
+                    "expected_ready_date": "",
+                    "severity": "none",
+                }),
                 "flow_options": flow_options,
                 "planning_cards": planning_cards_map.get(ps_id, []),
                 "op_cards": [],

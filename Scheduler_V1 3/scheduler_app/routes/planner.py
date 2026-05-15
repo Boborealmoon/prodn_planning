@@ -57,7 +57,7 @@ def _void_actual(con, actual_id):
     con.execute(
         """
         UPDATE production_actual
-        SET status = 'VOIDED', updated_at = CURRENT_TIMESTAMP
+        SET status = 'VOIDED'
         WHERE actual_id = ?
         """,
         (int(actual_id),),
@@ -619,6 +619,11 @@ def api_trial_create_operation():
         return jsonify({"error": cycle_error}), 400
     with db() as con:
         planning_status, execution_status = normalize_block_status_inputs(data)
+        planned_start_at = compact_text(data.get("planned_start_at") or data.get("anchor_datetime"))
+        planned_end_at = compact_text(data.get("planned_end_at"))
+        allow_pull_forward = 1 if int(data.get("allow_pull_forward", 1) or 0) else 0
+        active = 1 if int(data.get("active", 1) or 0) else 0
+        is_fresh_monday_item = 1 if int(data.get("is_fresh_monday_item", 0) or 0) else 0
         op_cur = con.execute(
             """
             INSERT INTO operation (
@@ -643,13 +648,14 @@ def api_trial_create_operation():
         operation_id = int(op_cur.lastrowid)
         queue_position = float(data.get("queue_position") or 0)
         if queue_position <= 0:
-            queue_position = 1 + float(one(con.execute("SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?", (machine_id,)))["mx"] or 0)
+            queue_position = 10 + float(one(con.execute("SELECT COALESCE(MAX(queue_position), 0) AS mx FROM run_block WHERE machine_id = ?", (machine_id,)))["mx"] or 0)
         block_cur = con.execute(
             """
             INSERT INTO run_block (
               operation_id, machine_id, queue_position, scheduled_qty, include_setup, status, planning_status, execution_status,
-              anchor_datetime, calculated_start_datetime, calculated_end_datetime, actual_good_qty, actual_reject_qty, remarks, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, ?, CURRENT_TIMESTAMP)
+              anchor_datetime, planned_start_at, planned_end_at, allow_pull_forward, active, is_fresh_monday_item,
+              calculated_start_datetime, calculated_end_datetime, actual_good_qty, actual_reject_qty, remarks, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 operation_id,
@@ -660,7 +666,16 @@ def api_trial_create_operation():
                 execution_status,
                 planning_status,
                 execution_status,
-                compact_text(data.get("anchor_datetime")),
+                planned_start_at or compact_text(data.get("anchor_datetime")),
+                planned_start_at,
+                planned_end_at,
+                allow_pull_forward,
+                active,
+                is_fresh_monday_item,
+                "",
+                "",
+                0,
+                0,
                 compact_text(data.get("remarks")),
             ),
         )
@@ -768,10 +783,22 @@ def api_trial_update_block(block_id):
             block_updates["include_setup"] = 1 if data.get("include_setup") else 0
         if "anchor_datetime" in data:
             block_updates["anchor_datetime"] = compact_text(data.get("anchor_datetime"))
+        if "planned_start_at" in data:
+            block_updates["planned_start_at"] = compact_text(data.get("planned_start_at"))
+        if "planned_end_at" in data:
+            block_updates["planned_end_at"] = compact_text(data.get("planned_end_at"))
+        if "allow_pull_forward" in data:
+            block_updates["allow_pull_forward"] = 1 if data.get("allow_pull_forward") else 0
+        if "active" in data:
+            block_updates["active"] = 1 if data.get("active") else 0
+        if "is_fresh_monday_item" in data:
+            block_updates["is_fresh_monday_item"] = 1 if data.get("is_fresh_monday_item") else 0
         if "actual_good_qty" in data:
             block_updates["actual_good_qty"] = max(0.0, parse_number(data.get("actual_good_qty"), block["actual_good_qty"]))
         if "actual_reject_qty" in data:
             block_updates["actual_reject_qty"] = max(0.0, parse_number(data.get("actual_reject_qty"), block["actual_reject_qty"]))
+        if "scheduler_note" in data:
+            block_updates["scheduler_note"] = compact_text(data.get("scheduler_note"))
         if "remarks" in data:
             block_updates["remarks"] = compact_text(data.get("remarks"))
         if block_updates:
@@ -812,18 +839,29 @@ def api_trial_split_block(block_id):
             """
             INSERT INTO run_block (
               operation_id, machine_id, queue_position, scheduled_qty, include_setup, status, planning_status, execution_status,
-              anchor_datetime, calculated_start_datetime, calculated_end_datetime, actual_good_qty, actual_reject_qty, remarks, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', 0, 0, ?, CURRENT_TIMESTAMP)
+              anchor_datetime, planned_start_at, planned_end_at, allow_pull_forward, active, is_fresh_monday_item,
+              calculated_start_datetime, calculated_end_datetime, actual_good_qty, actual_reject_qty, remarks, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 int(block["operation_id"]),
                 int(block["machine_id"]),
-                float(max_position) + 1,
+                float(max_position) + 10,
                 remaining,
                 int(block["include_setup"] or 0),
                 execution_status,
                 planning_status,
                 execution_status,
+                compact_text(block["anchor_datetime"]),
+                compact_text(block.get("planned_start_at") or block["anchor_datetime"]),
+                compact_text(block.get("planned_end_at")),
+                int(block.get("allow_pull_forward") if block.get("allow_pull_forward") is not None else 1),
+                int(block.get("active") if block.get("active") is not None else 1),
+                int(block.get("is_fresh_monday_item") or 0),
+                "",
+                "",
+                0,
+                0,
                 compact_text(block["remarks"]),
             ),
         )
@@ -857,7 +895,7 @@ def api_trial_reorder_blocks(block_id):
         for idx, ordered_block_id in enumerate(ordered_ids, 1):
             con.execute(
                 "UPDATE run_block SET machine_id = ?, queue_position = ?, updated_at = CURRENT_TIMESTAMP WHERE block_id = ?",
-                (machine_id, float(idx), ordered_block_id),
+                (machine_id, float(idx * 10), ordered_block_id),
             )
         for affected_machine_id in affected_machine_ids:
             recalculate_machine(con, affected_machine_id)
@@ -880,23 +918,60 @@ def api_trial_delete_block(block_id):
         group_id = int(block["group_id"] or 0)
         ps_id = compact_text(block["job_no"] or block["source_ps_id"] or "")
         base_ps_id = ps_id.split("::", 1)[0] if ps_id else ""
-
-        affected_machine_ids = {machine_id}
-        affected_operation_ids = {operation_id}
-
+        target_block_ids = [int(block_id)]
         if group_id:
-            group_blocks = rows(
+            target_block_rows = rows(
                 con.execute(
                     """
-                    SELECT block_id, operation_id, machine_id
+                    SELECT block_id, operation_id, machine_id, block_type
                     FROM run_block
                     WHERE group_id = ?
                     """,
                     (group_id,),
                 )
             )
-            affected_machine_ids.update(int(row["machine_id"]) for row in group_blocks if int(row["machine_id"] or 0))
-            affected_operation_ids.update(int(row["operation_id"]) for row in group_blocks if int(row["operation_id"] or 0))
+            target_block_ids = [int(row["block_id"]) for row in target_block_rows]
+        else:
+            target_block_rows = [dict(block)]
+
+        # Keep the delete operation safe: blocks with actuals or rework links are protected.
+        for row in target_block_rows:
+            actual_count = one(
+                con.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM production_actual
+                    WHERE block_id = ?
+                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    """,
+                    (int(row["block_id"]),),
+                )
+            )
+            if int((actual_count or {})["cnt"] if actual_count else 0) > 0:
+                return jsonify({"error": "This item has actual production records. Void/correct actuals before removing."}), 400
+            rework_guard = one(
+                con.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM rework_link
+                    WHERE source_block_id = ? OR rework_block_id = ?
+                    """,
+                    (int(row["block_id"]), int(row["block_id"])),
+                )
+            )
+            if int((rework_guard or {})["cnt"] if rework_guard else 0) > 0 or compact_text(row.get("block_type")).upper() == "REWORK":
+                return jsonify({"error": "This item is part of rework traceability. Remove or resolve the rework link first."}), 400
+
+        affected_machine_ids = {int(row["machine_id"]) for row in target_block_rows if int(row["machine_id"] or 0)}
+        affected_operation_ids = {int(row["operation_id"]) for row in target_block_rows if int(row["operation_id"] or 0)}
+
+        for row in target_block_rows:
+            block_id_value = int(row["block_id"])
+            con.execute("DELETE FROM schedule_alert WHERE block_id = ?", (block_id_value,))
+            con.execute("DELETE FROM machine_queue_state WHERE block_id = ?", (block_id_value,))
+            con.execute("DELETE FROM run_block_segment WHERE block_id = ?", (block_id_value,))
+
+        if group_id:
             if ps_id and base_ps_id and ps_id != base_ps_id:
                 con.execute(
                     """
@@ -928,8 +1003,7 @@ def api_trial_delete_block(block_id):
                 con.execute("DELETE FROM operation WHERE operation_id = ?", (int(op_id),))
 
         for mid in affected_machine_ids:
-            if mid:
-                recalculate_machine(con, int(mid))
+            recalculate_machine(con, int(mid))
         return jsonify({"ok": True})
 
 
@@ -1119,7 +1193,6 @@ def api_trial_actual(block_id):
             )
         )
         return jsonify({"ok": True, "block": trial_block_payload(trial_block_row(con, block_id), con), "actuals": [dict(r) for r in actuals]})
-
 
 @trial_bp.post("/api/trial/recalc")
 def api_trial_recalc():

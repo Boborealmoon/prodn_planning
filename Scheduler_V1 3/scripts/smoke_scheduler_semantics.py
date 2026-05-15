@@ -193,6 +193,53 @@ def main():
             return fail(f"VOIDED view smoke failed: {exc}")
 
         try:
+            with savepoint(con, "smoke_segment_actual_edit"):
+                seg_actual = one(
+                    con.execute(
+                        """
+                        SELECT a.actual_id, a.segment_id, a.block_id, a.report_date, a.remarks, a.target_qty_at_report,
+                               a.output_qty, a.reject_qty, COALESCE(a.machine_id, b.machine_id) AS machine_id
+                        FROM production_actual a
+                        JOIN run_block b ON b.block_id = a.block_id
+                        WHERE segment_id IS NOT NULL
+                          AND COALESCE(a.status, 'ACTIVE') = 'ACTIVE'
+                        ORDER BY actual_id
+                        LIMIT 1
+                        """
+                    )
+                )
+                if not seg_actual:
+                    return fail("no segment-backed actual found for edit smoke")
+                con.execute(
+                    "UPDATE production_actual SET status = 'VOIDED' WHERE actual_id = ?",
+                    (int(seg_actual["actual_id"]),),
+                )
+                con.execute(
+                    """
+                    INSERT INTO production_actual (
+                      segment_id, block_id, machine_id, report_date, remarks, reported_at,
+                      output_qty, reject_qty, target_qty_at_report, status, entry_type,
+                      correction_of_actual_id, good_qty_at_report, created_by
+                    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'ACTIVE', 'CORRECTION', ?, ?, '')
+                    """,
+                    (
+                        int(seg_actual["segment_id"]),
+                        int(seg_actual["block_id"]),
+                        int(seg_actual["machine_id"] or 0),
+                        str(seg_actual["report_date"] or ""),
+                        str(seg_actual["remarks"] or ""),
+                        seg_actual["output_qty"],
+                        seg_actual["reject_qty"],
+                        seg_actual["target_qty_at_report"],
+                        int(seg_actual["actual_id"]),
+                        None if seg_actual["output_qty"] is None or seg_actual["reject_qty"] is None else max(0.0, float(seg_actual["output_qty"] or 0) - float(seg_actual["reject_qty"] or 0)),
+                    ),
+                )
+            pass_msg("segment actuals can be edited via append/void correction")
+        except Exception as exc:
+            return fail(f"segment actual edit smoke failed: {exc}")
+
+        try:
             with savepoint(con, "smoke_recalc_states"):
                 recalculate_all(con)
                 schedule_run = one(con.execute("SELECT COUNT(*) AS c FROM schedule_run"))

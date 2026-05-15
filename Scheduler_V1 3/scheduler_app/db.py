@@ -621,6 +621,14 @@ def ensure_scheduler_schema(con):
         ON production_actual(correction_of_actual_id)
         """,
     )
+    con.execute("DROP INDEX IF EXISTS idx_trial_actual_segment_unique")
+    con.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_trial_actual_segment_unique
+        ON production_actual(segment_id)
+        WHERE segment_id IS NOT NULL AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+        """
+    )
 
     # PostgreSQL-friendly compatibility views.
     _create_view(

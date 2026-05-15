@@ -125,6 +125,14 @@ def create_schedule_run(con, reason, scope_type="FULL", machine_id=None, notes="
     return int(cur.lastrowid)
 
 
+def _normalized_ps_id(con, ps_id):
+    text = _text(ps_id)
+    if not text:
+        return None
+    row = one(con.execute("SELECT ps_id FROM process_sheet WHERE ps_id = ?", (text,)))
+    return text if row else None
+
+
 def active_calendar_windows_for_machine_day(con, machine_id, work_day):
     day_text = work_day.strftime("%Y-%m-%d")
     next_day_text = (work_day + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -423,6 +431,7 @@ def upsert_schedule_alert(
     delay_minutes=0,
     status="OPEN",
 ):
+    ps_id = _normalized_ps_id(con, ps_id)
     existing = one(
         con.execute(
             """

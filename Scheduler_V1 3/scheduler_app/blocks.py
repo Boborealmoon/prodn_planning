@@ -52,6 +52,49 @@ def _queue_state_for_block(con, block_id):
     )
 
 
+def _alerts_for_block(con, block_id):
+    if not con:
+        return []
+    return [
+        {
+            "alert_id": int(row["alert_id"]),
+            "alert_type": row["alert_type"] or "",
+            "severity": row["severity"] or "",
+            "message": row["message"] or "",
+            "status": row["status"] or "",
+            "delay_minutes": float(row["delay_minutes"] or 0),
+        }
+        for row in rows(
+            con.execute(
+                """
+                SELECT alert_id, alert_type, severity, message, status, delay_minutes
+                FROM schedule_alert
+                WHERE block_id = ?
+                  AND status IN ('OPEN', 'ACKNOWLEDGED')
+                ORDER BY created_at DESC, alert_id DESC
+                """,
+                (int(block_id),),
+            )
+        )
+    ]
+
+
+def _resolve_alerts_by_type(con, block_id, alert_type):
+    for alert in rows(
+        con.execute(
+            """
+            SELECT alert_id
+            FROM schedule_alert
+            WHERE block_id = ?
+              AND alert_type = ?
+              AND status IN ('OPEN', 'ACKNOWLEDGED')
+            """,
+            (int(block_id), str(alert_type)),
+        )
+    ):
+        resolve_schedule_alert(con, int(alert["alert_id"]))
+
+
 def trial_block_payload(block, con=None):
     if not block:
         return None
@@ -64,6 +107,8 @@ def trial_block_payload(block, con=None):
     good_qty = float(queue_state["good_qty"] if queue_state and queue_state["good_qty"] is not None else float(block["actual_good_qty"] or 0))
     reject_qty = float(queue_state["reject_qty"] if queue_state and queue_state["reject_qty"] is not None else float(block["actual_reject_qty"] or 0))
     schedule_status = queue_state["schedule_status"] if queue_state and queue_state["schedule_status"] else planning_status
+    is_late = int(queue_state["is_late"] or 0) if queue_state else 0
+    delay_minutes = float(queue_state["delay_minutes"] or 0) if queue_state else 0.0
     return {
         "block_id": int(block["block_id"]),
         "operation_id": int(block["operation_id"]),
@@ -88,6 +133,8 @@ def trial_block_payload(block, con=None):
         "calculated_end_datetime": block["calculated_end_datetime"] or "",
         "predicted_start_at": predicted_start_at,
         "predicted_end_at": predicted_end_at,
+        "is_late": is_late,
+        "delay_minutes": delay_minutes,
         "actual_good_qty": good_qty,
         "actual_reject_qty": reject_qty,
         "good_qty": good_qty,
@@ -113,6 +160,7 @@ def trial_block_payload(block, con=None):
         "group_id": int(block.get("group_id") or 0),
         "group_label": block.get("group_label") or "",
         "group_type": block.get("group_type") or "",
+        "alerts": _alerts_for_block(con, block["block_id"]) if con else [],
     }
 
 
@@ -183,6 +231,157 @@ def dependency_finish_for_block(con, block):
     )
     finish_text = compact_text(prev_row["dependency_finish"] if prev_row else "")
     return parse_dt_text(finish_text) if finish_text else None
+
+
+def _production_start_for_block(con, block_id):
+    row = one(
+        con.execute(
+            """
+            SELECT MIN(start_datetime) AS start_datetime
+            FROM run_block_segment
+            WHERE block_id = ?
+              AND segment_type = 'production'
+              AND COALESCE(segment_status, 'PLANNED') = 'PLANNED'
+            """,
+            (int(block_id),),
+        )
+    ) or {}
+    text = compact_text(row.get("start_datetime"))
+    if text:
+        parsed = parse_dt_text(text)
+        if parsed:
+            return parsed
+    block = trial_block_row(con, block_id)
+    if not block:
+        return None
+    for key in ("calculated_start_datetime", "planned_start_at", "anchor_datetime"):
+        parsed = parse_dt_text(block.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _latest_active_block_for_operation_step(con, source_ps_id, source_op_seq_id):
+    return one(
+        con.execute(
+            """
+            SELECT b.block_id, o.cycle_minutes_per_qty, b.scheduled_qty, b.calculated_start_datetime,
+                   b.planned_start_at, b.anchor_datetime, b.operation_id
+            FROM run_block b
+            JOIN operation o ON o.operation_id = b.operation_id
+            JOIN operation_seq s ON s.op_seq_id = o.source_op_seq_id
+            WHERE COALESCE(o.source_ps_id, '') = ?
+              AND COALESCE(o.source_op_seq_id, 0) = ?
+              AND COALESCE(b.active, 1) = 1
+            ORDER BY COALESCE(b.calculated_start_datetime, b.planned_start_at, b.anchor_datetime, '') DESC,
+                     b.queue_position DESC,
+                     b.block_id DESC
+            LIMIT 1
+            """,
+            (compact_text(source_ps_id), int(source_op_seq_id)),
+        )
+    )
+
+
+def dependency_no_starve_ready_time_for_block(con, block, candidate_start=None, qty_to_schedule=None):
+    source_ps_id = compact_text(block.get("source_ps_id") or "")
+    source_op_seq_id = int(block.get("source_op_seq_id") or 0)
+    if not source_ps_id or not source_op_seq_id:
+        return dependency_finish_for_block(con, block)
+
+    current_step = one(
+        con.execute(
+            """
+            SELECT s.op_seq_id, s.seq_no, s.bom_id
+            FROM operation_seq s
+            WHERE s.op_seq_id = ?
+            """,
+            (source_op_seq_id,),
+        )
+    )
+    if not current_step:
+        return dependency_finish_for_block(con, block)
+
+    prev_steps = rows(
+        con.execute(
+            """
+            SELECT s.op_seq_id, s.seq_no, s.bom_id
+            FROM operation_seq s
+            WHERE s.bom_id = ?
+              AND s.seq_no < ?
+            ORDER BY s.seq_no DESC, s.op_seq_id DESC
+            """,
+            (int(current_step["bom_id"] or 0), int(current_step["seq_no"] or 0)),
+        )
+    )
+    if not prev_steps:
+        return dependency_finish_for_block(con, block)
+
+    qty = float(qty_to_schedule if qty_to_schedule is not None else block.get("scheduled_qty") or 0)
+    curr_cycle = max(0.0, float(block.get("cycle_minutes_per_qty") or 0))
+    if curr_cycle <= 0 or qty <= 0:
+        return dependency_finish_for_block(con, block)
+
+    ready_times = []
+    for prev_step in prev_steps:
+        prev_block = _latest_active_block_for_operation_step(con, source_ps_id, int(prev_step["op_seq_id"] or 0))
+        if not prev_block:
+            continue
+        prev_start = _production_start_for_block(con, int(prev_block["block_id"]))
+        if not prev_start:
+            continue
+        prev_cycle = max(0.0, float(prev_block["cycle_minutes_per_qty"] or 0))
+        if prev_cycle <= 0:
+            continue
+        ready_offset_minutes = prev_cycle + max(qty - 1.0, 0.0) * max(prev_cycle - curr_cycle, 0.0)
+        ready_times.append(prev_start + timedelta(minutes=ready_offset_minutes))
+
+    if not ready_times:
+        return dependency_finish_for_block(con, block)
+
+    ready_time = max(ready_times)
+    if candidate_start and isinstance(candidate_start, datetime) and candidate_start > ready_time:
+        return candidate_start
+    return ready_time
+
+
+def _apply_planned_start_constraints(con, block, candidate_start, planned_start, schedule_run_id=None, machine_id=None):
+    if not planned_start or not candidate_start:
+        _resolve_alerts_by_type(con, int(block["block_id"]), "MONDAY_ANCHOR_DELAYED_BY_SPILLOVER")
+        return candidate_start
+
+    block_id = int(block["block_id"])
+    block_machine_id = int(machine_id if machine_id is not None else block.get("machine_id") or 0)
+    allow_pull_forward = 1 if int(block.get("allow_pull_forward") if block.get("allow_pull_forward") is not None else 1) else 0
+    is_fresh_monday = 1 if int(block.get("is_fresh_monday_item") or 0) else 0
+    is_pull_forward = candidate_start < planned_start
+
+    if is_pull_forward and (allow_pull_forward == 0 or is_fresh_monday == 1):
+        candidate_start = planned_start
+
+    if is_fresh_monday == 1 and candidate_start > planned_start:
+        delay_minutes = max(0.0, (candidate_start - planned_start).total_seconds() / 60.0)
+        upsert_schedule_alert(
+            con,
+            schedule_run_id=schedule_run_id,
+            block_id=block_id,
+            operation_id=int(block["operation_id"]),
+            ps_id=compact_text(block.get("source_ps_id")),
+            machine_id=block_machine_id or None,
+            alert_type="MONDAY_ANCHOR_DELAYED_BY_SPILLOVER",
+            severity="WARN",
+            message="Fresh Monday item delayed by spillover.",
+            old_value=planned_start.strftime("%Y-%m-%d %H:%M:%S"),
+            new_value=candidate_start.strftime("%Y-%m-%d %H:%M:%S"),
+            planned_at=planned_start.strftime("%Y-%m-%d %H:%M:%S"),
+            predicted_at=candidate_start.strftime("%Y-%m-%d %H:%M:%S"),
+            delay_minutes=delay_minutes,
+            status="OPEN",
+        )
+    else:
+        _resolve_alerts_by_type(con, block_id, "MONDAY_ANCHOR_DELAYED_BY_SPILLOVER")
+
+    return candidate_start
 
 
 def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add, schedule_run_id=None):
@@ -1115,6 +1314,33 @@ def recalculate_machine(con, machine_id, reason="PLANNER_CHANGE", schedule_run_i
                     delay_minutes=0,
                     status="OPEN",
                 )
+            planned_end_text = compact_text(block.get("planned_end_at"))
+            if planned_end_text and end_text:
+                planned_end_dt = parse_dt_text(planned_end_text)
+                predicted_end_dt = parse_dt_text(end_text)
+                if planned_end_dt and predicted_end_dt and predicted_end_dt > planned_end_dt:
+                    delay_minutes = max(0.0, (predicted_end_dt - planned_end_dt).total_seconds() / 60.0)
+                    upsert_schedule_alert(
+                        con,
+                        schedule_run_id=schedule_run_id,
+                        block_id=block_id,
+                        operation_id=int(block["operation_id"]),
+                        ps_id=compact_text(block.get("source_ps_id")),
+                        machine_id=int(machine_id),
+                        alert_type="SCHEDULE_DELAYED",
+                        severity="WARN",
+                        message="Predicted end exceeds planned end.",
+                        old_value=planned_end_text,
+                        new_value=end_text,
+                        planned_at=planned_end_text,
+                        predicted_at=end_text,
+                        delay_minutes=delay_minutes,
+                        status="OPEN",
+                    )
+                else:
+                    _resolve_alerts_by_type(con, block_id, "SCHEDULE_DELAYED")
+            else:
+                _resolve_alerts_by_type(con, block_id, "SCHEDULE_DELAYED")
 
     for item in queue_items:
         members = item["members"]
@@ -1124,12 +1350,25 @@ def recalculate_machine(con, machine_id, reason="PLANNER_CHANGE", schedule_run_i
         if not is_combined:
             block = leader
             planned_start = parse_dt_text(block["planned_start_at"]) or parse_dt_text(block["anchor_datetime"])
-            dependency_finish = dependency_finish_for_block(con, block)
+            setup_minutes = float(block["setup_minutes"] or 0) if int(block["include_setup"] or 0) == 1 else 0.0
+            dependency_finish = dependency_no_starve_ready_time_for_block(
+                con,
+                block,
+                qty_to_schedule=max(0.0, float(block["scheduled_qty"] or 0) - max(0.0, float(block["actual_good_qty"] or 0))),
+            )
             candidate_start = current_dt
-            if dependency_finish and dependency_finish > candidate_start:
-                candidate_start = dependency_finish
-            if planned_start and candidate_start < planned_start and (int(block.get("allow_pull_forward") if block.get("allow_pull_forward") is not None else 1) == 0 or int(block.get("is_fresh_monday_item") or 0) == 1):
-                candidate_start = planned_start
+            if dependency_finish:
+                dependency_start_floor = dependency_finish - timedelta(minutes=setup_minutes) if setup_minutes > 0 else dependency_finish
+                if dependency_start_floor > candidate_start:
+                    candidate_start = dependency_start_floor
+            candidate_start = _apply_planned_start_constraints(
+                con,
+                block,
+                candidate_start,
+                planned_start,
+                schedule_run_id=schedule_run_id,
+                machine_id=machine_id,
+            )
             current_dt = candidate_start
 
             actual_bounds = preserved_actual_bounds_for_block(con, int(block["block_id"]))
@@ -1199,12 +1438,27 @@ def recalculate_machine(con, machine_id, reason="PLANNER_CHANGE", schedule_run_i
         combined_cycle = sum(float(member["cycle_minutes_per_qty"] or 0) for member in members)
         scheduled_qty = max((float(member["scheduled_qty"] or 0) for member in members), default=0.0)
         leader_planned_start = parse_dt_text(leader["planned_start_at"]) or parse_dt_text(leader["anchor_datetime"])
-        leader_dependency_finish = dependency_finish_for_block(con, leader)
+        combined_rule_block = dict(leader)
+        combined_rule_block["allow_pull_forward"] = 0 if any(int(member.get("allow_pull_forward") or 0) == 0 for member in members) else 1
+        combined_rule_block["is_fresh_monday_item"] = 1 if any(int(member.get("is_fresh_monday_item") or 0) == 1 for member in members) else 0
+        leader_dependency_finish = dependency_no_starve_ready_time_for_block(
+            con,
+            leader,
+            qty_to_schedule=max(0.0, float(leader["scheduled_qty"] or 0) - max(0.0, float(leader["actual_good_qty"] or 0))),
+        )
         candidate_start = current_dt
-        if leader_dependency_finish and leader_dependency_finish > candidate_start:
-            candidate_start = leader_dependency_finish
-        if leader_planned_start and candidate_start < leader_planned_start and (int(leader.get("allow_pull_forward") if leader.get("allow_pull_forward") is not None else 1) == 0 or int(leader.get("is_fresh_monday_item") or 0) == 1):
-            candidate_start = leader_planned_start
+        if leader_dependency_finish:
+            leader_dependency_start_floor = leader_dependency_finish - timedelta(minutes=setup_minutes) if setup_minutes > 0 else leader_dependency_finish
+            if leader_dependency_start_floor > candidate_start:
+                candidate_start = leader_dependency_start_floor
+        candidate_start = _apply_planned_start_constraints(
+            con,
+            combined_rule_block,
+            candidate_start,
+            leader_planned_start,
+            schedule_run_id=schedule_run_id,
+            machine_id=machine_id,
+        )
         current_dt = candidate_start
 
         actual_bounds_by_block = {int(member["block_id"]): preserved_actual_bounds_for_block(con, int(member["block_id"])) for member in members}

@@ -486,8 +486,36 @@ function localISODate(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function parseLocalDateParts(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4] || 0),
+    minute: Number(match[5] || 0),
+    second: Number(match[6] || 0),
+  };
+}
+
+function parseLocalDateTime(value) {
+  const parts = parseLocalDateParts(value);
+  if (parts) {
+    return new Date(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  }
+  if (!value) return null;
+  const dt = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 function addDaysToISODate(dateText, days) {
-  const d = new Date(String(dateText || localISODate()) + 'T00:00:00');
+  const parts = parseLocalDateParts(dateText || localISODate());
+  const d = parts
+    ? new Date(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0)
+    : new Date(String(dateText || localISODate()) + 'T00:00:00');
   d.setDate(d.getDate() + Number(days || 0));
   return localISODate(d);
 }
@@ -506,9 +534,7 @@ function escapeHtml(value) {
 }
 
 function parseDateTime(value) {
-  if (!value) return null;
-  const dt = new Date(String(value).replace(' ', 'T'));
-  return Number.isNaN(dt.getTime()) ? null : dt;
+  return parseLocalDateTime(value);
 }
 
 function HHMM(value) {

@@ -151,7 +151,12 @@
   .trial-catalog-ps-date {
     justify-self: end;
     align-self: start;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
     padding-top: 1px;
+    white-space: normal;
   }
   .trial-catalog-ps-main {
     display: grid;
@@ -1089,11 +1094,42 @@ function trialFormatDt(value) {
   return String(value).replace('T', ' ').slice(0, 16);
 }
 
-function trialParseVisualDateTime(value) {
+function trialParseLocalDateParts(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4] || 0);
+  const minute = Number(match[5] || 0);
+  const second = Number(match[6] || 0);
+  return { year, month, day, hour, minute, second };
+}
+
+function trialParseLocalDateTime(value) {
+  const parts = trialParseLocalDateParts(value);
+  if (parts) {
+    return new Date(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  }
   if (!value) return null;
-  const text = String(value).replace(' ', 'T');
-  const dt = new Date(text);
+  const dt = new Date(String(value).replace(' ', 'T'));
   return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function trialParseLocalDate(value) {
+  const parts = trialParseLocalDateParts(value);
+  if (parts) {
+    return new Date(parts.year, parts.month - 1, parts.day, 0, 0, 0, 0);
+  }
+  if (!value) return null;
+  const dt = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function trialParseVisualDateTime(value) {
+  return trialParseLocalDateTime(value);
 }
 
 function trialSplitPsId(value) {
@@ -1200,20 +1236,18 @@ function trialVisibleMachines() {
 }
 
 function trialDateStart(dateText) {
-  if (!dateText) return null;
-  return new Date(`${dateText}T00:00:00`);
+  return trialParseLocalDate(dateText);
 }
 
 function trialDateEnd(dateText) {
-  if (!dateText) return null;
-  return new Date(`${dateText}T23:59:59`);
+  const d = trialParseLocalDate(dateText);
+  if (!d) return null;
+  d.setHours(23, 59, 59, 999);
+  return d;
 }
 
 function trialParseDateTime(value) {
-  if (!value) return null;
-  const text = String(value).replace(' ', 'T');
-  const dt = new Date(text);
-  return Number.isNaN(dt.getTime()) ? null : dt;
+  return trialParseLocalDateTime(value);
 }
 
 function trialDateRangesOverlap(itemStart, itemEnd, filterStart, filterEnd) {
@@ -1825,12 +1859,12 @@ function renderTrialMachine(machine) {
     const netOutput = trialBlockNetOutput(group.output_qty, group.reject_qty);
     const anchored = !!leader?.anchor_datetime;
     const materialStatus = group.material_status || leader?.material_status || {};
-    const materialChipClass = trialMaterialStatusClass(materialStatus);
     const combinedLine = group.blocks.length > 1 ? `${group.blocks.length} ops combined` : '';
     const operationLine = group.blocks.length > 1
       ? String(group.operation_label || group.group_label || '').trim()
       : [opDisplay.op_no, opDisplay.op_name].filter(Boolean).join(' ');
     const pairedOutput = Number(group.paired_output_qty ?? netOutput ?? 0);
+    const outputPillClass = String(group.status || '').toUpperCase() === 'DONE' ? 'green' : 'gray';
     const actualButton = group.blocks.length > 1
       ? `<button class="btn btn-ghost btn-sm" type="button" onclick="openTrialGroupActualModal(${Number(group.group_id || 0)})">Actual</button>`
       : `<button class="btn btn-ghost btn-sm" type="button" onclick="openTrialActualModal(${leader?.block_id || 0})">Actual</button>`;
@@ -1848,14 +1882,11 @@ function renderTrialMachine(machine) {
           ${combinedLine ? `<div class="trial-block-combined-line">${escapeHtml(combinedLine)}</div>` : ''}
         </div>
         <div class="trial-op-card-statuses">
-          <span class="trial-pill ${trialPlanningStatusClass(group.planning_status)}">Plan ${escapeHtml(group.planning_status || 'UNPLANNED')}</span>
-          <span class="trial-pill ${trialStatusClass(group.status)}">Exec ${escapeHtml(group.status)}</span>
         </div>
         <div class="trial-op-card-info">
           <button class="trial-pill trial-pill-start clickable ${anchored ? 'yellow' : 'gray'}" type="button" onclick="editTrialAnchor(${leader?.block_id || 0})" title="Click to edit anchor">Start ${trialFormatDt(group.visual_start_datetime || group.group_start)}</button>
           <span class="trial-pill">End ${trialFormatDt(group.visual_end_datetime || group.group_end)}</span>
-          <span class="trial-pill">Output: ${fmt(pairedOutput, 0)}</span>
-          ${materialStatus?.label ? `<span class="trial-pill ${materialChipClass}">${escapeHtml(materialStatus.label)}</span>` : ''}
+          <span class="trial-pill ${outputPillClass}">Output: ${fmt(pairedOutput, 0)}</span>
         </div>
         ${group.blocks.length > 1 ? `
           <div class="trial-block-member-progress">
@@ -2282,7 +2313,6 @@ function trialFlowSelectHtml(ps) {
   const label = selectedFlowCode || '';
   return `
     <label style="display:grid;gap:4px;justify-items:end">
-      <span class="trial-catalog-section-note">BOM Code${label ? ` · ${escapeHtml(label)}` : ''}</span>
       <select class="trial-catalog-flow-select" data-ps-id="${escapeHtml(ps.ps_id || '')}" ${flows.length ? '' : 'disabled'} onchange="setTrialSelectedFlow(this.dataset.psId, this.value)">
         ${options.join('')}
       </select>
@@ -2371,9 +2401,11 @@ function renderTrialCatalog() {
     const psIdParts = String(ps.ps_id || '').split('::');
     const basePsId = psIdParts[0] || ps.ps_id || '';
     const partialText = psIdParts[1] ? `Partial ${psIdParts[1]}` : '';
+    const materialStatus = ps.material_status || {};
+    const materialChipClass = trialMaterialStatusClass(materialStatus);
     const opCardsHtml = (ps.op_cards || []).map(card => renderTrialOpCardHtml(card)).join('');
     return `
-      <details class="trial-catalog-ps" ${rawQuery ? 'open' : ''} data-ps-id="${escapeHtml(ps.ps_id || '')}" data-base-ps-id="${escapeHtml(basePsId)}" data-partial-text="${escapeHtml(partialText)}" data-part-name="${escapeHtml(ps.part_name || '')}" data-inv-desc="${escapeHtml(ps.part_desc || '')}" data-due-date="${escapeHtml(ps.due_date || '')}">
+      <details class="trial-catalog-ps" ${rawQuery ? 'open' : ''} data-ps-id="${escapeHtml(ps.ps_id || '')}" data-base-ps-id="${escapeHtml(basePsId)}" data-partial-text="${escapeHtml(partialText)}" data-part-name="${escapeHtml(ps.part_name || '')}" data-inv-desc="${escapeHtml(ps.part_desc || '')}" data-due-date="${escapeHtml(ps.due_date || '')}" data-material-label="${escapeHtml(materialStatus.label || '')}" data-material-class="${escapeHtml(materialChipClass || '')}">
         <summary>
           <span>${escapeHtml(basePsId)}</span>
           <span class="trial-catalog-ps-meta trial-catalog-ps-date">${escapeHtml(ps.due_date || 'No due date')}</span>
@@ -2389,7 +2421,7 @@ function renderTrialCatalog() {
     `;
   }).join('');
   const plannedHtml = plannedCatalog.map(ps => `
-    <div class="trial-catalog-ps trial-catalog-planned-ps" data-ps-id="${escapeHtml(ps.ps_id || '')}">
+    <div class="trial-catalog-ps trial-catalog-planned-ps" data-ps-id="${escapeHtml(ps.ps_id || '')}" data-material-label="${escapeHtml((ps.material_status || {}).label || '')}" data-material-class="${escapeHtml(trialMaterialStatusClass(ps.material_status || {}))}">
       <div class="trial-catalog-planned-head">
         <div class="trial-catalog-ps-main">
           <div class="trial-catalog-ps-id">${escapeHtml(String(ps.ps_id || '').split('::')[0] || ps.ps_id || '')}</div>
@@ -2449,6 +2481,8 @@ function decorateTrialCatalogCards() {
     const basePsId = card.dataset.basePsId || '';
     const partialText = card.dataset.partialText || '';
     const dueDate = card.dataset.dueDate || 'No due date';
+    const materialLabel = card.dataset.materialLabel || '';
+    const materialClass = card.dataset.materialClass || '';
     const dayDiff = trialDateDiffDays(dueDate);
     card.classList.remove('overdue', 'due-soon');
     if (dayDiff != null) {
@@ -2462,7 +2496,10 @@ function decorateTrialCatalogCards() {
         <div class="trial-catalog-ps-part">${escapeHtml(card.dataset.partName || 'Part No')}</div>
         ${card.dataset.invDesc ? `<div class="trial-catalog-ps-desc">${escapeHtml(card.dataset.invDesc)}</div>` : ''}
       </div>
-      <span class="trial-catalog-ps-meta trial-catalog-ps-date">${escapeHtml(dueDate)}</span>
+      <div class="trial-catalog-ps-meta trial-catalog-ps-date">
+        <span>${escapeHtml(dueDate)}</span>
+        ${materialLabel ? `<span class="trial-pill ${materialClass}">${escapeHtml(materialLabel)}</span>` : ''}
+      </div>
     `;
   });
 }
@@ -3158,13 +3195,15 @@ async function deleteTrialPlanningCard(cardId) {
 }
 
 function trialShiftDate(dateText, deltaDays) {
-  const base = new Date(`${dateText || trialTodayLocal()}T00:00:00`);
+  const base = trialParseLocalDate(dateText || trialTodayLocal());
+  if (!base) return trialTodayLocal();
   base.setDate(base.getDate() + Number(deltaDays || 0));
   return trialDateText(base);
 }
 
 function trialDefaultProfileNameForDate(dateText) {
-  const d = new Date(`${dateText || trialTodayLocal()}T00:00:00`);
+  const d = trialParseLocalDate(dateText || trialTodayLocal());
+  if (!d) return 'NORMAL_DAY_NIGHT';
   const weekday = d.getDay();
   if (weekday === 0) return 'OFF';
   if (weekday === 6) return 'SATURDAY';
@@ -3177,7 +3216,8 @@ function trialTodayLocal() {
 }
 
 function trialDateText(value) {
-  const d = value instanceof Date ? value : new Date(value);
+  const d = value instanceof Date ? value : trialParseLocalDate(value);
+  if (!d) return '';
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
