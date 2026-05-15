@@ -124,26 +124,26 @@ def trial_find_or_create_part(con, part_no, description=""):
     return int(cur.lastrowid)
 
 
-def trial_find_or_create_flow(con, part_id, flow_code):
-    flow_code = compact_text(flow_code)
-    if not part_id or not flow_code:
+def trial_find_or_create_flow(con, part_id, bom_code):
+    bom_code = compact_text(bom_code)
+    if not part_id or not bom_code:
         return 0
-    flow = one(con.execute("SELECT * FROM bom_variation WHERE part_id = ? AND flow_code = ?", (int(part_id), flow_code)))
+    flow = one(con.execute("SELECT * FROM bom_variation WHERE part_id = ? AND bom_code = ?", (int(part_id), bom_code)))
     if flow:
         return int(flow["bom_id"])
     existing_count = int(one(con.execute("SELECT COUNT(*) AS cnt FROM bom_variation WHERE part_id = ?", (int(part_id),)))["cnt"] or 0)
     cur = con.execute(
-        "INSERT INTO bom_variation (part_id, flow_code, flow_name, is_default) VALUES (?, ?, ?, ?)",
-        (int(part_id), flow_code, "", 1 if existing_count <= 0 else 0),
+        "INSERT INTO bom_variation (part_id, bom_code, flow_name, is_default) VALUES (?, ?, ?, ?)",
+        (int(part_id), bom_code, "", 1 if existing_count <= 0 else 0),
     )
     return int(cur.lastrowid)
 
 
-def trial_upsert_flow_from_rows(con, part_no, flow_code, stage_rows):
+def trial_upsert_flow_from_rows(con, part_no, bom_code, stage_rows):
     part_id = trial_find_or_create_part(con, part_no, "")
-    if not part_id or not flow_code:
+    if not part_id or not bom_code:
         return 0
-    bom_id = trial_find_or_create_flow(con, part_id, flow_code)
+    bom_id = trial_find_or_create_flow(con, part_id, bom_code)
     if not bom_id:
         return 0
     con.execute("DELETE FROM operation_seq WHERE bom_id = ?", (bom_id,))
@@ -302,7 +302,7 @@ def trial_import_workbook(con, file_storage):
         bom_groups = {}
         for row in workbook_data.get("BOM_op_stage", []):
             part_no = first_nonempty(row, "inventory_code", "part_no", "item_code", "source_inventory_code")
-            bom_code = compact_text(row.get("bom_code"))
+            bom_code = first_nonempty(row, "bom_code")
             if not part_no or not bom_code:
                 continue
             bom_groups.setdefault((part_no, bom_code), []).append(row)

@@ -23,7 +23,7 @@ def api_process_sheet(ps_id):
                     ps.*,
                     p.part_no AS part_name,
                     p.part_desc AS part_desc,
-                    sf.bom_code AS selected_flow_code
+                    sf.bom_code AS selected_bom_code
                 FROM process_sheet ps
                 LEFT JOIN parts p ON p.part_id = ps.part_id
                 LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
@@ -37,7 +37,7 @@ def api_process_sheet(ps_id):
         payload = dict(row)
         payload["part_name"] = payload.get("part_name") or payload.get("part_no") or ""
         payload["part_desc"] = payload.get("part_desc") or payload.get("part_desc") or ""
-        payload["selected_flow_code"] = payload.get("selected_flow_code") or ""
+        payload["selected_bom_code"] = payload.get("selected_bom_code") or ""
         payload["planning_cards"] = []
         return jsonify(payload)
 
@@ -47,7 +47,7 @@ def api_process_sheet(ps_id):
 def api_process_sheet_selected_flow(ps_id):
     data = request.get_json(force=True, silent=True) or {}
     bom_id = int(data.get("bom_id") or 0)
-    flow_code = compact_text(data.get("flow_code"))
+    bom_code = compact_text(data.get("bom_code"))
     with db() as con:
         ps = one(
             con.execute(
@@ -75,7 +75,7 @@ def api_process_sheet_selected_flow(ps_id):
                     (bom_id, part_id),
                 )
             )
-        elif flow_code:
+        elif bom_code:
             flow = one(
                 con.execute(
                     """
@@ -83,7 +83,7 @@ def api_process_sheet_selected_flow(ps_id):
                     FROM bom_variation
                     WHERE part_id = ? AND bom_code = ?
                     """,
-                    (part_id, flow_code),
+                    (part_id, bom_code),
                 )
             )
         if not flow:
@@ -102,7 +102,7 @@ def api_process_sheet_selected_flow(ps_id):
                 "ok": True,
                 "ps_id": ps_id,
                 "selected_bom_id": int(flow["bom_id"]),
-                "selected_flow_code": flow["bom_code"] or "",
+                "selected_bom_code": flow["bom_code"] or "",
             }
         )
 
@@ -116,7 +116,7 @@ def api_part_flows(part_id):
             return jsonify({"error": "Part not found"}), 404
         flows = rows(
             con.execute(
-                "SELECT bom_id, bom_code AS flow_code, bom_desc AS flow_name, is_default FROM bom_variation WHERE part_id = ? ORDER BY is_default DESC, bom_id",
+                "SELECT bom_id, bom_code, bom_desc AS bom_name, is_default FROM bom_variation WHERE part_id = ? ORDER BY is_default DESC, bom_id",
                 (int(part_id),),
             )
         )
@@ -148,11 +148,11 @@ def api_update_flow(bom_id):
         flow = one(con.execute("SELECT * FROM bom_variation WHERE bom_id = ?", (int(bom_id),)))
         if not flow:
             return jsonify({"error": "Flow not found"}), 404
-        flow_code = compact_text(data.get("flow_code")) or flow["bom_code"]
+        bom_code = compact_text(data.get("bom_code")) or flow["bom_code"]
         is_default = 1 if data.get("is_default") else 0
         con.execute(
             "UPDATE bom_variation SET bom_code = ?, is_default = ? WHERE bom_id = ?",
-            (flow_code, is_default, int(bom_id)),
+            (bom_code, is_default, int(bom_id)),
         )
         steps = data.get("steps") or []
         con.execute("DELETE FROM operation_seq WHERE bom_id = ?", (int(bom_id),))

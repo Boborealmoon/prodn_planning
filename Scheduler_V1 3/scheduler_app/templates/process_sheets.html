@@ -345,7 +345,7 @@ function renderDetails(ps) {
   const key = psDomId(ps.ps_id);
   const psArg = JSON.stringify(ps.ps_id);
   const flowOptions = (ps.flow_options || []).map(flow => `
-    <option value="${flow.bom_id}" ${Number(flow.bom_id) === Number(ps.selected_bom_id) ? 'selected' : ''}>${esc(flow.flow_code || flow.flow_name || flow.bom_id)}</option>
+    <option value="${flow.bom_id}" ${Number(flow.bom_id) === Number(ps.selected_bom_id) ? 'selected' : ''}>${esc(flow.bom_code || flow.bom_name || flow.bom_id)}</option>
   `).join('');
   const steps = (ps.flow_steps || []).map(step => `
     <div class="block-card">

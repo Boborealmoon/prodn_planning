@@ -239,8 +239,8 @@ def _process_sheet_payload(ps, steps, metrics, material_status):
         "status": ps["status"] or "",
         "planner_status": planner_status,
         "selected_bom_id": int(ps["selected_bom_id"] or 0),
-        "selected_flow_code": ps["selected_flow_code"] or "",
-        "route_label": ps["selected_flow_code"] or "No flow selected",
+        "selected_bom_code": ps["selected_bom_code"] or "",
+        "route_label": ps["selected_bom_code"] or "No BOM code selected",
         "planned_qty": planned_qty,
         "finished_qty": finished_qty,
         "reject_qty": reject_qty,
@@ -293,7 +293,7 @@ def _flow_options(con, part_id):
         for row in rows(
             con.execute(
                 """
-                SELECT bom_id, bom_code AS flow_code, bom_desc AS flow_name, is_default
+                SELECT bom_id, bom_code, bom_desc AS bom_name, is_default
                 FROM bom_variation
                 WHERE part_id = ?
                 ORDER BY is_default DESC, bom_id
@@ -314,7 +314,7 @@ def list_process_sheets_payload(con):
     ps_rows = [dict(row) for row in rows(
         con.execute(
             """
-            SELECT ps.*, p.part_no AS part_name, p.part_desc AS part_desc, sf.bom_code AS selected_flow_code, sf.bom_desc AS selected_flow_name
+            SELECT ps.*, p.part_no AS part_name, p.part_desc AS part_desc, sf.bom_code AS selected_bom_code, sf.bom_desc AS selected_bom_name
             FROM process_sheet ps
             LEFT JOIN parts p ON p.part_id = ps.part_id
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
@@ -350,7 +350,7 @@ def list_process_sheets_payload(con):
                 "part_name",
                 "part_no",
                 "part_desc",
-                "selected_flow_code",
+                "selected_bom_code",
                 "status",
                 "planner_status",
             )
@@ -384,7 +384,7 @@ def api_process_sheet_details(ps_id):
         ps = one(
             con.execute(
                 """
-                SELECT ps.*, p.part_no AS part_name, p.part_desc AS part_desc, sf.bom_code AS selected_flow_code, sf.bom_desc AS selected_flow_name
+            SELECT ps.*, p.part_no AS part_name, p.part_desc AS part_desc, sf.bom_code AS selected_bom_code, sf.bom_desc AS selected_bom_name
                 FROM process_sheet ps
                 LEFT JOIN parts p ON p.part_id = ps.part_id
                 LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
@@ -478,8 +478,8 @@ def api_process_sheet_details(ps_id):
                 "process_sheet": dict(ps),
                 "selected_flow": {
                     "bom_id": int(ps["selected_bom_id"] or 0),
-                    "flow_code": ps["selected_flow_code"] or "",
-                    "flow_name": ps["selected_flow_name"] or "",
+                    "bom_code": ps["selected_bom_code"] or "",
+                    "bom_name": ps["selected_bom_name"] or "",
                 },
                 "flow_options": _flow_options(con, ps["part_id"]),
                 "flow_steps": [_step_payload(step, metrics_by_ps.get(ps_id, {}).get("by_op", {})) for step in steps_by_ps.get(ps_id, [])],

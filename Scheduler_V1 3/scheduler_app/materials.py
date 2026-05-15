@@ -46,7 +46,7 @@ def _ps_requirement_context(con, ps_id):
         con.execute(
             """
             SELECT ps.*,
-                   sf.bom_code AS selected_flow_code
+                   sf.bom_code AS selected_bom_code
             FROM process_sheet ps
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
             WHERE ps.ps_id = ?
@@ -68,7 +68,7 @@ def sync_material_requirements_for_ps(con, ps_id):
     source_inventory_code = compact_text(ps["part_no"])
     if not source_inventory_code:
         return {"inserted": 0, "updated": 0, "skipped": 0, "requirement_ids": []}
-    bom_code = compact_text(ps["selected_flow_code"] or "")
+    bom_code = compact_text(ps["selected_bom_code"] or "")
     material_qty_needed = max(0.0, parse_number(ps["total_qty"], 0))
     material_uom = "EA" if material_qty_needed > 0 else ""
 
@@ -248,7 +248,7 @@ def material_requirement_rows_for_ps(con, ps_id):
     ps = one(
         con.execute(
             """
-            SELECT ps.ps_id, sf.bom_code AS selected_flow_code
+            SELECT ps.ps_id, sf.bom_code AS selected_bom_code
             FROM process_sheet ps
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
             WHERE ps.ps_id = ?
@@ -259,8 +259,8 @@ def material_requirement_rows_for_ps(con, ps_id):
     if not ps:
         return []
 
-    flow_code = compact_text(ps["selected_flow_code"])
-    if flow_code:
+    bom_code = compact_text(ps["selected_bom_code"])
+    if bom_code:
         matched = rows(
             con.execute(
                 """
@@ -270,7 +270,7 @@ def material_requirement_rows_for_ps(con, ps_id):
                   AND bom_code = ?
                 ORDER BY requirement_id
                 """,
-                (ps_id, flow_code),
+                (ps_id, bom_code),
             )
         )
         if matched:
@@ -446,7 +446,7 @@ def _requirement_join_rows(con):
                    ps.status AS ps_status,
                    ps.planner_status,
                    ps.selected_bom_id,
-                   sf.bom_code AS selected_flow_code,
+                   sf.bom_code AS selected_bom_code,
                    p.part_no AS part_name,
                    p.part_desc AS part_desc
             FROM material_requirement mr

@@ -2167,7 +2167,7 @@ async function openTrialBOMEditor(psId) {
     }
     trialBOMMeta = {
       bom_id: Number(flow.bom_id),
-      flow_code: flow.flow_code || `FLOW-${flow.bom_id}`,
+      bom_code: flow.bom_code || `BOM-${flow.bom_id}`,
       is_default: !!flow.is_default,
       ps_id: ps.ps_id,
       part_name: ps.part_name || ps.part_no || '',
@@ -2182,7 +2182,7 @@ async function openTrialBOMEditor(psId) {
           <div style="font-size:12px;color:var(--text3);font-weight:700">PS No: ${escapeHtml(basePsId)}</div>
         </div>
         <div class="trial-modal-grid">
-          <label>BOM Code <input id="trial-bom-flow-code" value="${escapeHtml(trialBOMMeta.flow_code)}"></label>
+          <label>BOM Code <input id="trial-bom-code" value="${escapeHtml(trialBOMMeta.bom_code)}"></label>
           <label>Default <select id="trial-bom-flow-default"><option value="0" ${trialBOMMeta.is_default ? '' : 'selected'}>No</option><option value="1" ${trialBOMMeta.is_default ? 'selected' : ''}>Yes</option></select></label>
         </div>
         <div id="trial-bom-editor"></div>
@@ -2284,7 +2284,7 @@ async function saveTrialBOMEditor(psId) {
       };
     });
     await PUT(`/api/trial/flows/${trialBOMMeta.bom_id}`, {
-      flow_code: document.getElementById('trial-bom-flow-code').value,
+      bom_code: document.getElementById('trial-bom-code').value,
       is_default: document.getElementById('trial-bom-flow-default').value === '1',
       steps,
     });
@@ -2298,22 +2298,21 @@ async function saveTrialBOMEditor(psId) {
 
 function trialFlowSelectHtml(ps) {
   const flows = Array.isArray(ps.flow_options) ? ps.flow_options : [];
-  const selectedFlowCode = String(ps.selected_bom_code || ps.selected_flow_code || '');
+  const selectedBomCode = String(ps.selected_bom_code || '');
   const options = [];
   if (!flows.length) {
     options.push('<option value="">No BOM code available</option>');
   } else {
     options.push('<option value="">Select BOM code</option>');
     flows.forEach(flow => {
-      const code = String(flow.bom_code || flow.flow_code || '');
+      const code = String(flow.bom_code || '');
       const label = `${code}${flow.is_default ? ' (default)' : ''}`;
-      options.push(`<option value="${escapeHtml(code)}" ${code === selectedFlowCode ? 'selected' : ''}>${escapeHtml(label)}</option>`);
+      options.push(`<option value="${escapeHtml(code)}" ${code === selectedBomCode ? 'selected' : ''}>${escapeHtml(label)}</option>`);
     });
   }
-  const label = selectedFlowCode || '';
   return `
     <label style="display:grid;gap:4px;justify-items:end">
-      <select class="trial-catalog-flow-select" data-ps-id="${escapeHtml(ps.ps_id || '')}" ${flows.length ? '' : 'disabled'} onchange="setTrialSelectedFlow(this.dataset.psId, this.value)">
+      <select class="trial-catalog-flow-select" data-ps-id="${escapeHtml(ps.ps_id || '')}" ${flows.length ? '' : 'disabled'} onchange="setTrialSelectedBomCode(this.dataset.psId, this.value)">
         ${options.join('')}
       </select>
     </label>
@@ -2331,17 +2330,17 @@ function trialOpQtyLabel(op) {
   return `Qty ${fmt(remaining, 0)}`;
 }
 
-async function setTrialSelectedFlow(psId, flowCode) {
-  const code = String(flowCode || '').trim();
+async function setTrialSelectedBomCode(psId, bomCode) {
+  const code = String(bomCode || '').trim();
   if (!code) return;
   try {
     await PUT(`/api/trial/process-sheets/${encodeURIComponent(psId)}/flow`, {
-      flow_code: code,
+      bom_code: code,
     });
     await loadTrial();
-    toast(`Flow updated for ${psId}`, 'success');
+    toast(`BOM code updated for ${psId}`, 'success');
   } catch (e) {
-    toast('Flow update failed: ' + e.message, 'error');
+    toast('BOM code update failed: ' + e.message, 'error');
   }
 }
 
