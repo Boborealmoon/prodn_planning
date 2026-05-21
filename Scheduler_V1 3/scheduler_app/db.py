@@ -454,13 +454,14 @@ def ensure_scheduler_schema(con):
         ON schedule_alert(schedule_run_id)
         """,
     )
+    con.execute("DROP INDEX IF EXISTS uq_schedule_alert_open_block_type")
     ensure_index(
         con,
         "uq_schedule_alert_open_block_type",
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_alert_open_block_type
         ON schedule_alert(block_id, alert_type)
-        WHERE status IN ('OPEN', 'ACKNOWLEDGED')
+        WHERE status IN ('ACTIVE', 'OPEN', 'ACKNOWLEDGED')
         """,
     )
 
@@ -534,6 +535,14 @@ def ensure_scheduler_schema(con):
     ensure_column(con, "run_block", "planned_qty_original", "planned_qty_original REAL NOT NULL DEFAULT 0")
     ensure_column(con, "run_block", "split_from_block_id", "split_from_block_id INTEGER REFERENCES run_block(block_id) ON DELETE SET NULL")
     ensure_column(con, "run_block", "scheduler_note", "scheduler_note TEXT NOT NULL DEFAULT ''")
+    ensure_column(con, "process_sheet", "completed", "completed INTEGER NOT NULL DEFAULT 0")
+    ensure_column(con, "process_sheet", "completed_at", "completed_at TEXT NOT NULL DEFAULT ''")
+    ensure_column(con, "process_sheet", "completed_by", "completed_by TEXT NOT NULL DEFAULT ''")
+    ensure_column(con, "operation", "pp_partial_no", "pp_partial_no TEXT NOT NULL DEFAULT ''")
+    ensure_column(con, "operation", "selected_bom_id", "selected_bom_id INTEGER NOT NULL DEFAULT 0")
+    ensure_column(con, "operation", "opn_completed", "opn_completed INTEGER NOT NULL DEFAULT 0")
+    ensure_column(con, "operation", "opn_completed_at", "opn_completed_at TEXT NOT NULL DEFAULT ''")
+    ensure_column(con, "operation", "opn_completed_by", "opn_completed_by TEXT NOT NULL DEFAULT ''")
 
     ensure_index(
         con,
@@ -551,6 +560,15 @@ def ensure_scheduler_schema(con):
         ON run_block(operation_id)
         """,
     )
+    if column_exists(con, "run_block", "group_id"):
+        ensure_index(
+            con,
+            "idx_run_block_group_id",
+            """
+            CREATE INDEX IF NOT EXISTS idx_run_block_group_id
+            ON run_block(group_id)
+            """,
+        )
     ensure_index(
         con,
         "idx_run_block_last_schedule_run_id",
@@ -589,6 +607,14 @@ def ensure_scheduler_schema(con):
         ON run_block_segment(machine_id, start_datetime, end_datetime)
         """,
     )
+    ensure_index(
+        con,
+        "idx_run_block_segment_block_type_start",
+        """
+        CREATE INDEX IF NOT EXISTS idx_run_block_segment_block_type_start
+        ON run_block_segment(block_id, segment_type, start_datetime)
+        """,
+    )
 
     ensure_column(con, "production_actual", "machine_id", "machine_id INTEGER REFERENCES machines(machine_id) ON DELETE SET NULL")
     ensure_column(con, "production_actual", "status", "status TEXT NOT NULL DEFAULT 'ACTIVE'")
@@ -596,6 +622,38 @@ def ensure_scheduler_schema(con):
     ensure_column(con, "production_actual", "correction_of_actual_id", "correction_of_actual_id INTEGER REFERENCES production_actual(actual_id) ON DELETE SET NULL")
     ensure_column(con, "production_actual", "good_qty_at_report", "good_qty_at_report REAL")
     ensure_column(con, "production_actual", "created_by", "created_by TEXT NOT NULL DEFAULT ''")
+    if not table_exists(con, "block_removed_actual_date"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS block_removed_actual_date (
+              removed_date_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              block_id INTEGER NOT NULL REFERENCES run_block(block_id) ON DELETE CASCADE,
+              report_date TEXT NOT NULL,
+              target_qty_removed REAL NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'ACTIVE',
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(block_id, report_date)
+            )
+            """
+        )
+    ensure_column(con, "block_removed_actual_date", "target_qty_removed", "target_qty_removed REAL NOT NULL DEFAULT 0")
+    ensure_column(con, "block_removed_actual_date", "status", "status TEXT NOT NULL DEFAULT 'ACTIVE'")
+    ensure_column(con, "block_removed_actual_date", "created_at", "created_at TEXT DEFAULT CURRENT_TIMESTAMP")
+    ensure_column(con, "block_removed_actual_date", "updated_at", "updated_at TEXT DEFAULT CURRENT_TIMESTAMP")
+    ensure_index(
+        con,
+        "uq_block_removed_actual_date_block_report_date",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_block_removed_actual_date_block_report_date
+        ON block_removed_actual_date(block_id, report_date)
+        """,
+    )
+    ensure_column(con, "schedule_alert", "actual_start_at", "actual_start_at TEXT")
+    ensure_column(con, "schedule_alert", "expected_start_at", "expected_start_at TEXT")
+    ensure_column(con, "schedule_alert", "drift_hours", "drift_hours REAL")
+    ensure_column(con, "schedule_alert", "output_efficiency", "output_efficiency REAL")
+    ensure_column(con, "schedule_alert", "dismissed_at", "dismissed_at TEXT")
 
     ensure_index(
         con,
@@ -611,6 +669,14 @@ def ensure_scheduler_schema(con):
         """
         CREATE INDEX IF NOT EXISTS idx_production_actual_report_date
         ON production_actual(report_date)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_production_actual_block_reported_at",
+        """
+        CREATE INDEX IF NOT EXISTS idx_production_actual_block_reported_at
+        ON production_actual(block_id, reported_at)
         """,
     )
     ensure_index(
@@ -706,10 +772,299 @@ def ensure_scheduler_schema(con):
     _ensure_state_rows(con)
 
 
+def ensure_planning_schema(con):
+    if not table_exists(con, "planning_setting"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planning_setting (
+              setting_key TEXT PRIMARY KEY,
+              setting_value TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    if table_exists(con, "planning_setting"):
+        for key, value in (
+            ("planning_efficiency", "0.85"),
+            ("planning_calendar_policy", "MON_FRI_ONLY"),
+            ("planning_start_time", "08:30"),
+        ):
+            con.execute(
+                """
+                INSERT OR IGNORE INTO planning_setting (setting_key, setting_value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                """,
+                (key, value),
+            )
+
+    if not table_exists(con, "planning_schedule_run"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planning_schedule_run (
+              planning_run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              reason TEXT NOT NULL DEFAULT 'PLANNER_RECALCULATE',
+              status TEXT NOT NULL DEFAULT 'CURRENT',
+              planning_efficiency REAL NOT NULL DEFAULT 0.85,
+              calendar_policy TEXT NOT NULL DEFAULT 'MON_FRI_ONLY',
+              generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              notes TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+    ensure_index(
+        con,
+        "idx_planning_schedule_run_status",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_run_status
+        ON planning_schedule_run(status)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_schedule_run_generated_at",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_run_generated_at
+        ON planning_schedule_run(generated_at)
+        """,
+    )
+
+    if not table_exists(con, "planning_schedule_segment"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planning_schedule_segment (
+              planning_segment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              planning_run_id INTEGER NOT NULL REFERENCES planning_schedule_run(planning_run_id) ON DELETE CASCADE,
+              block_id INTEGER NOT NULL REFERENCES run_block(block_id) ON DELETE CASCADE,
+              operation_id INTEGER NOT NULL REFERENCES operation(operation_id) ON DELETE CASCADE,
+              machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+              segment_date TEXT NOT NULL,
+              segment_type TEXT NOT NULL DEFAULT 'production',
+              planned_qty REAL NOT NULL DEFAULT 0,
+              planned_minutes REAL NOT NULL DEFAULT 0,
+              start_datetime TEXT NOT NULL,
+              end_datetime TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    ensure_index(
+        con,
+        "idx_planning_schedule_segment_run",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_segment_run
+        ON planning_schedule_segment(planning_run_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_schedule_segment_block",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_segment_block
+        ON planning_schedule_segment(block_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_schedule_segment_operation",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_segment_operation
+        ON planning_schedule_segment(operation_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_schedule_segment_machine_time",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_segment_machine_time
+        ON planning_schedule_segment(machine_id, start_datetime, end_datetime)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_schedule_segment_date",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_schedule_segment_date
+        ON planning_schedule_segment(segment_date)
+        """,
+    )
+
+    if not table_exists(con, "planning_block_state"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planning_block_state (
+              block_id INTEGER PRIMARY KEY REFERENCES run_block(block_id) ON DELETE CASCADE,
+              planning_run_id INTEGER REFERENCES planning_schedule_run(planning_run_id) ON DELETE SET NULL,
+              expected_start_at TEXT,
+              expected_end_at TEXT,
+              planned_qty REAL NOT NULL DEFAULT 0,
+              planned_minutes REAL NOT NULL DEFAULT 0,
+              machine_id INTEGER,
+              operation_id INTEGER,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    ensure_index(
+        con,
+        "idx_planning_block_state_run",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_block_state_run
+        ON planning_block_state(planning_run_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_block_state_machine",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_block_state_machine
+        ON planning_block_state(machine_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_block_state_operation",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_block_state_operation
+        ON planning_block_state(operation_id)
+        """,
+    )
+
+    if not table_exists(con, "planning_operation_state"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planning_operation_state (
+              operation_id INTEGER PRIMARY KEY REFERENCES operation(operation_id) ON DELETE CASCADE,
+              planning_run_id INTEGER REFERENCES planning_schedule_run(planning_run_id) ON DELETE SET NULL,
+              ps_id TEXT NOT NULL DEFAULT '',
+              expected_start_at TEXT,
+              expected_end_at TEXT,
+              planned_qty REAL NOT NULL DEFAULT 0,
+              planned_minutes REAL NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    ensure_index(
+        con,
+        "idx_planning_operation_state_run",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_operation_state_run
+        ON planning_operation_state(planning_run_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_operation_state_ps",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_operation_state_ps
+        ON planning_operation_state(ps_id)
+        """,
+    )
+
+    if not table_exists(con, "planning_process_sheet_state"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planning_process_sheet_state (
+              ps_id TEXT PRIMARY KEY REFERENCES process_sheet(ps_id) ON DELETE CASCADE,
+              planning_run_id INTEGER REFERENCES planning_schedule_run(planning_run_id) ON DELETE SET NULL,
+              expected_start_at TEXT,
+              expected_end_at TEXT,
+              planned_qty REAL NOT NULL DEFAULT 0,
+              planned_minutes REAL NOT NULL DEFAULT 0,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    ensure_index(
+        con,
+        "idx_planning_process_sheet_state_run",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_process_sheet_state_run
+        ON planning_process_sheet_state(planning_run_id)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planning_process_sheet_state_expected_end",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planning_process_sheet_state_expected_end
+        ON planning_process_sheet_state(expected_end_at)
+        """,
+    )
+
+    ensure_index(
+        con,
+        "idx_operation_source_ps_seq",
+        """
+        CREATE INDEX IF NOT EXISTS idx_operation_source_ps_seq
+        ON operation(source_ps_id, source_op_seq_id)
+        """,
+    )
+
+    if not table_exists(con, "planner_opn_state"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS planner_opn_state (
+              opn_state_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source_ps_id TEXT NOT NULL,
+              pp_partial_no TEXT NOT NULL DEFAULT '',
+              selected_bom_id INTEGER NOT NULL DEFAULT 0,
+              source_op_seq_id INTEGER NOT NULL DEFAULT 0,
+              source_op_no TEXT NOT NULL DEFAULT '',
+              operation_id INTEGER NOT NULL DEFAULT 0,
+              opn_completed INTEGER NOT NULL DEFAULT 0,
+              opn_completed_at TEXT NOT NULL DEFAULT '',
+              opn_completed_by TEXT NOT NULL DEFAULT '',
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    ensure_column(con, "planner_opn_state", "pp_partial_no", "pp_partial_no TEXT NOT NULL DEFAULT ''")
+    con.execute("DROP INDEX IF EXISTS idx_planner_opn_state_lookup")
+    ensure_index(
+        con,
+        "idx_planner_opn_state_lookup",
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_planner_opn_state_lookup
+        ON planner_opn_state(source_ps_id, pp_partial_no, selected_bom_id, source_op_seq_id, source_op_no)
+        """,
+    )
+    ensure_index(
+        con,
+        "idx_planner_opn_state_operation_id",
+        """
+        CREATE INDEX IF NOT EXISTS idx_planner_opn_state_operation_id
+        ON planner_opn_state(operation_id)
+        """,
+    )
+
+    if not table_exists(con, "source_ps_bom_selection"):
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_ps_bom_selection (
+              source_ps_id TEXT PRIMARY KEY,
+              bom_id INTEGER NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    ensure_index(
+        con,
+        "idx_source_ps_bom_selection_bom_id",
+        """
+        CREATE INDEX IF NOT EXISTS idx_source_ps_bom_selection_bom_id
+        ON source_ps_bom_selection(bom_id)
+        """,
+    )
+
+
 def ensure_db():
     print(f"Scheduler DB: {DB_PATH}")
     with db() as con:
         ensure_scheduler_schema(con)
+        ensure_planning_schema(con)
 
         if table_columns(con, "capacity_profile"):
             existing_profiles = {row["profile_name"] for row in rows(con.execute("SELECT profile_name FROM capacity_profile"))}

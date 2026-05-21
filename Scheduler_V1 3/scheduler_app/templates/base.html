@@ -21,8 +21,9 @@
         </div>
 
         <div class="topnav">
-            <a href="/planner" class="topnav-link {% if request.path in ['/planner', '/trial'] %}active{% endif %}">Planner</a>
-            <a href="/process-sheets" class="topnav-link {% if request.path == '/process-sheets' %}active{% endif %}">Process Sheets</a>
+            <a href="/planner" class="topnav-link {% if request.path in ['/planner', '/planner-baseline'] %}active{% endif %}">Planner</a>
+            <a href="/trial" class="topnav-link {% if request.path in ['/trial', '/actual-production'] %}active{% endif %}">Actual Production</a>
+            <a href="/process-sheets" class="topnav-link {% if request.path == '/process-sheets' %}active{% endif %}">{% if request.path in ['/trial', '/actual-production'] %}Sheets{% else %}Process Sheets{% endif %}</a>
             <a href="/gantt" class="topnav-link {% if request.path == '/gantt' %}active{% endif %}">Gantt</a>
             <a href="/summary" class="topnav-link {% if request.path == '/summary' %}active{% endif %}">Summary</a>
             <span class="topnav-separator"></span>

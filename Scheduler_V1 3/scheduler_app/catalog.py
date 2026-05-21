@@ -13,24 +13,31 @@ def trial_catalog_items(con, include_completed=False):
     for row in rows(
         con.execute(
             """
-            SELECT o.source_ps_id, o.source_op_no, o.source_op_seq_id AS source_op_seq_id,
+            SELECT o.source_ps_id, o.pp_partial_no, o.selected_bom_id, o.source_op_no, o.source_op_seq_id AS source_op_seq_id,
                    COALESCE(SUM(COALESCE(b.scheduled_qty, 0)), 0) AS planned_qty
             FROM operation o
             JOIN run_block b ON b.operation_id = o.operation_id
             WHERE COALESCE(o.source_ps_id, '') <> ''
               AND COALESCE(b.active, 1) = 1
               AND COALESCE(b.block_type, 'ORIGINAL') <> 'REWORK'
-            GROUP BY o.source_ps_id, o.source_op_no, o.source_op_seq_id
+            GROUP BY o.source_ps_id, COALESCE(o.pp_partial_no, ''), COALESCE(o.selected_bom_id, 0), o.source_op_no, o.source_op_seq_id
             """
         )
     ):
-        key = trial_catalog_op_key(row["source_ps_id"], row["source_op_no"], row["source_op_seq_id"])
+        key = (
+            compact_text(row["source_ps_id"]),
+            compact_text(row["pp_partial_no"] or ""),
+            int(row["selected_bom_id"] or 0),
+            int(row["source_op_seq_id"] or 0),
+            compact_text(row["source_op_no"] or ""),
+        )
         planned_qty_by_op[key] = float(row["planned_qty"] or 0)
 
     records = rows(
         con.execute(
             """
-            SELECT ps.ps_id, ps.part_id, ps.part_no AS part_no, ps.part_desc AS part_desc, ps.due_date, ps.total_qty, ps.status, ps.planner_status, ps.selected_bom_id AS selected_bom_id,
+            SELECT ps.ps_id, ps.source_ps_id, ps.pp_partial_no, ps.part_id, ps.part_no AS part_no, ps.part_desc AS part_desc, ps.due_date, ps.total_qty, ps.status, ps.planner_status, ps.selected_bom_id AS selected_bom_id,
+                   ps.completed AS completed, ps.completed_at AS completed_at, ps.completed_by AS completed_by,
                    sf.bom_code AS selected_bom_code,
                    p.part_no AS part_name, pfs.op_seq_id AS op_seq_id, pfs.seq_no, pfs.op_no, pfs.op_type, pfs.machine_category, pfs.preferred_machine,
                    pfs.cycle_time, pfs.setup_time, pfs.is_last_op
@@ -39,7 +46,7 @@ def trial_catalog_items(con, include_completed=False):
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
             LEFT JOIN operation_seq pfs ON pfs.bom_id = ps.selected_bom_id
             WHERE COALESCE(ps.selected_bom_id, 0) > 0
-              AND (? = 1 OR (COALESCE(ps.planner_status, '') <> 'COMPLETED' AND COALESCE(ps.status, '') <> 'COMPLETED'))
+              AND (? = 1 OR (COALESCE(ps.completed, 0) = 0 AND COALESCE(ps.planner_status, '') <> 'COMPLETED' AND COALESCE(ps.status, '') <> 'COMPLETED'))
             ORDER BY ps.due_date, ps.ps_id, pfs.seq_no, pfs.op_seq_id
             """,
             (1 if include_completed else 0,),
@@ -48,13 +55,14 @@ def trial_catalog_items(con, include_completed=False):
     unassigned_records = rows(
         con.execute(
             """
-            SELECT ps.ps_id, ps.part_id, ps.part_no AS part_no, ps.part_desc AS part_desc, ps.due_date, ps.total_qty, ps.status, ps.planner_status, ps.selected_bom_id AS selected_bom_id,
+            SELECT ps.ps_id, ps.source_ps_id, ps.pp_partial_no, ps.part_id, ps.part_no AS part_no, ps.part_desc AS part_desc, ps.due_date, ps.total_qty, ps.status, ps.planner_status, ps.selected_bom_id AS selected_bom_id,
+                   ps.completed AS completed, ps.completed_at AS completed_at, ps.completed_by AS completed_by,
                    '' AS selected_bom_code,
                    p.part_no AS part_name
             FROM process_sheet ps
             LEFT JOIN parts p ON p.part_id = ps.part_id
             WHERE COALESCE(ps.selected_bom_id, 0) = 0
-              AND (? = 1 OR (COALESCE(ps.planner_status, '') <> 'COMPLETED' AND COALESCE(ps.status, '') <> 'COMPLETED'))
+              AND (? = 1 OR (COALESCE(ps.completed, 0) = 0 AND COALESCE(ps.planner_status, '') <> 'COMPLETED' AND COALESCE(ps.status, '') <> 'COMPLETED'))
             ORDER BY ps.due_date, ps.ps_id
             """,
             (1 if include_completed else 0,),
@@ -66,7 +74,13 @@ def trial_catalog_items(con, include_completed=False):
     for row in records:
         ps_id = compact_text(row["ps_id"])
         op_seq_id = int(row["op_seq_id"] or 0)
-        op_key = trial_catalog_op_key(ps_id, row["op_no"], op_seq_id)
+        op_key = (
+            ps_id,
+            compact_text(row["pp_partial_no"] or ""),
+            int(row["selected_bom_id"] or 0),
+            op_seq_id,
+            compact_text(row["op_no"] or ""),
+        )
         required_qty = float(row["total_qty"] or 0)
         planned_qty = float(planned_qty_by_op.get(op_key, 0) or 0)
         remaining_qty = max(0.0, required_qty - planned_qty)
@@ -74,6 +88,8 @@ def trial_catalog_items(con, include_completed=False):
             ps_id,
             {
                 "ps_id": ps_id,
+                "source_ps_id": compact_text(row["source_ps_id"] or ps_id),
+                "pp_partial_no": compact_text(row["pp_partial_no"] or ""),
                 "part_id": int(row["part_id"] or 0),
                 "part_name": row["part_name"] or "",
                 "part_no": row["part_no"] or "",
@@ -82,6 +98,9 @@ def trial_catalog_items(con, include_completed=False):
                 "total_qty": float(row["total_qty"] or 0),
                 "status": row["status"] or "",
                 "planner_status": row["planner_status"] or "",
+                "completed": bool(int(row["completed"] or 0)),
+                "completed_at": row["completed_at"] or "",
+                "completed_by": row["completed_by"] or "",
                 "selected_bom_id": int(row["selected_bom_id"] or 0),
                 "selected_bom_code": row["selected_bom_code"] or "",
                 "ops": [],
@@ -90,6 +109,7 @@ def trial_catalog_items(con, include_completed=False):
         )
         op_item = {
             "source_ps_id": ps_id,
+            "pp_partial_no": compact_text(row["pp_partial_no"] or ""),
             "source_op_seq_id": op_seq_id,
             "source_op_no": row["op_no"] or "",
             "op_no": row["op_no"] or "",
@@ -147,10 +167,12 @@ def trial_catalog_items(con, include_completed=False):
             )
             op_cards.append(
                 {
-                    "card_kind": "group",
-                    "card_id": int(card["card_id"]),
-                    "ps_id": card["ps_id"] or item["ps_id"],
-                    "operation_label": card["operation_label"] or "",
+                "card_kind": "group",
+                "card_id": int(card["card_id"]),
+                "ps_id": card["ps_id"] or item["ps_id"],
+                "source_ps_id": item["source_ps_id"] or item["ps_id"],
+                "pp_partial_no": item.get("pp_partial_no") or "",
+                "operation_label": card["operation_label"] or "",
                     "operation_name": group_operation_name,
                     "target_qty": float(card["target_qty"] or 0),
                     "remaining_qty": float(card["target_qty"] or 0),
@@ -166,15 +188,23 @@ def trial_catalog_items(con, include_completed=False):
             )
 
         for op in item["ops"]:
-            op_key = trial_catalog_op_key(op["source_ps_id"], op["source_op_no"], op["source_op_seq_id"])
+            op_key = (
+                compact_text(op["source_ps_id"] or ""),
+                compact_text(op.get("pp_partial_no") or ""),
+                int(item["selected_bom_id"] or 0),
+                int(op["source_op_seq_id"] or 0),
+                compact_text(op["source_op_no"] or ""),
+            )
             if op_key in covered_keys:
                 continue
             op_cards.append(
                 {
-                    "card_kind": "single",
-                    "card_id": None,
-                    "ps_id": op["source_ps_id"] or item["ps_id"],
-                    "operation_label": op["source_op_no"] or op["operation_name"] or op["op_type"] or "",
+                "card_kind": "single",
+                "card_id": None,
+                "ps_id": op["source_ps_id"] or item["ps_id"],
+                "source_ps_id": op["source_ps_id"] or item["source_ps_id"] or item["ps_id"],
+                "pp_partial_no": op.get("pp_partial_no") or item.get("pp_partial_no") or "",
+                "operation_label": op["source_op_no"] or op["operation_name"] or op["op_type"] or "",
                     "operation_name": op["op_type"] or op["operation_name"] or "",
                     "target_qty": float(op["remaining_qty"] or 0),
                     "remaining_qty": float(op["remaining_qty"] or 0),
@@ -208,8 +238,10 @@ def trial_catalog_items(con, include_completed=False):
         else:
             planned.append(
                 {
-                    "ps_id": item["ps_id"],
-                    "part_id": item["part_id"],
+                "ps_id": item["ps_id"],
+                "source_ps_id": item["source_ps_id"],
+                "pp_partial_no": item.get("pp_partial_no") or "",
+                "part_id": item["part_id"],
                     "part_name": item["part_name"],
                     "part_no": item["part_no"],
                     "part_desc": item["part_desc"],
@@ -233,6 +265,8 @@ def trial_catalog_items(con, include_completed=False):
         planned.append(
             {
                 "ps_id": ps_id,
+                "source_ps_id": compact_text(row["source_ps_id"] or ps_id),
+                "pp_partial_no": compact_text(row["pp_partial_no"] or ""),
                 "part_id": part_id,
                 "part_name": row["part_name"] or "",
                 "part_no": row["part_no"] or "",
@@ -241,6 +275,9 @@ def trial_catalog_items(con, include_completed=False):
                 "total_qty": float(row["total_qty"] or 0),
                 "status": row["status"] or "",
                 "planner_status": row["planner_status"] or "",
+                "completed": bool(int(row["completed"] or 0)),
+                "completed_at": row["completed_at"] or "",
+                "completed_by": row["completed_by"] or "",
                 "selected_bom_id": int(row["selected_bom_id"] or 0),
                 "selected_bom_code": row["selected_bom_code"] or "",
                 "material_status": material_status_map.get(ps_id, {

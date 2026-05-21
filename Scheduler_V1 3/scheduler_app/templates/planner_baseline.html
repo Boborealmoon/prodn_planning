@@ -1,0 +1,2564 @@
+{% extends "base.html" %}
+{% block title %}Planner{% endblock %}
+{% block page_title %}
+<span style="display:block;font-size:32px;line-height:0.98;letter-spacing:-0.05em;font-weight:900;">Planner</span>
+{% endblock %}
+{% block page_actions %}
+  <div class="planner-toolbar">
+    <button class="btn btn-primary btn-sm" type="button" onclick="recalculatePlannerBaseline()">Recalculate Plan</button>
+    <button class="btn btn-ghost btn-sm" type="button" onclick="loadPlannerBaseline()">Refresh</button>
+  </div>
+{% endblock %}
+{% block content %}
+<style>
+  .planner-shell {
+    display: grid;
+    gap: 14px;
+  }
+  .pl-pill-row,
+  .planner-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .pl-pill,
+  .planner-chip,
+  .trial-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    background: rgba(37,99,235,0.08);
+    color: var(--text2);
+    border: 1px solid rgba(37,99,235,0.18);
+  }
+  .pl-pill.good,
+  .planner-chip.good,
+  .trial-pill.green {
+    background: rgba(5,150,105,0.09);
+    color: var(--green, #059669);
+    border-color: rgba(5,150,105,0.20);
+  }
+  .pl-pill.warn,
+  .planner-chip.warn,
+  .trial-pill.yellow {
+    background: rgba(217,119,6,0.10);
+    color: var(--amber, #d97706);
+    border-color: rgba(217,119,6,0.20);
+  }
+  .pl-pill.neutral,
+  .planner-chip.neutral {
+    background: rgba(30,28,24,0.05);
+    color: var(--text2);
+    border-color: rgba(26,28,29,0.10);
+  }
+  .pl-op-list {
+    display: grid;
+    gap: 6px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid rgba(26,28,29,0.08);
+    background: rgba(249,248,246,0.92);
+  }
+  .pl-op {
+    display: grid;
+    gap: 6px;
+    padding: 9px 11px;
+    border-radius: 14px;
+    border: 1px solid rgba(37,99,235,0.14);
+    border-left: 3px solid rgba(37,99,235,0.50);
+    background: #fff;
+    cursor: grab;
+  }
+  .pl-op.is-completed {
+    opacity: 0.55;
+    filter: grayscale(0.25);
+    cursor: not-allowed;
+    background: rgba(248,249,250,0.9);
+    border-left-color: rgba(26,28,29,0.18);
+  }
+  .planner-op.is-completed,
+  .pl2-op.is-completed {
+    opacity: 0.55;
+    filter: grayscale(0.25);
+    cursor: not-allowed;
+    background: rgba(248,249,250,0.9);
+    border-left-color: rgba(148,163,184,0.55);
+  }
+  .pl2-op.is-fully-planned {
+    opacity: 0.55;
+    filter: grayscale(0.2);
+    cursor: not-allowed;
+    border-left-color: rgba(26,28,29,0.22);
+    background: rgba(248,249,250,0.9);
+  }
+  .pl2-op.is-partially-planned {
+    border-left-color: rgba(245,158,11,0.75);
+    background: rgba(245,158,11,0.05);
+  }
+  .pl-op-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .pl-op-title {
+    font-size: 12.5px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .pl-op-sub {
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 1px;
+    overflow-wrap: anywhere;
+  }
+  .pl-op-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .pl-op-kind-badge {
+    font-size: 9.5px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text3);
+    background: rgba(30,28,24,0.06);
+    border-radius: 999px;
+    padding: 2px 7px;
+  }
+  .pl-op-child-list {
+    display: grid;
+    gap: 5px;
+    padding-left: 10px;
+    border-left: 2px solid rgba(37,99,235,0.18);
+    margin-top: 2px;
+  }
+  .pl-op-empty {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1.5px dashed rgba(26,28,29,0.14);
+    color: var(--text3);
+    font-size: 11.5px;
+    text-align: center;
+    font-style: italic;
+    background: rgba(255,255,255,0.65);
+  }
+  .planner-hero {
+    display: grid;
+    gap: 12px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.94), rgba(247,248,250,0.88));
+    box-shadow: var(--shadow-lg);
+  }
+  .planner-hero-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .planner-hero-title {
+    display: grid;
+    gap: 4px;
+  }
+  .planner-kicker {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--text3);
+    font-weight: 900;
+  }
+  .planner-subtitle {
+    max-width: 72ch;
+    color: var(--text3);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .planner-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .planner-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .planner-toolbar-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(26,28,29,0.08);
+    background: rgba(255,255,255,0.82);
+  }
+  .planner-toolbar-card label {
+    display: grid;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--text3);
+  }
+  .planner-toolbar-card input {
+    width: 84px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg2);
+    color: var(--text);
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 14px;
+  }
+  .planner-toolbar-note {
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.4;
+  }
+  .planner-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 14px;
+    align-items: start;
+  }
+  .planner-sidebar,
+  .trial-sidebar {
+    position: sticky;
+    top: 18px;
+    display: grid;
+    gap: 12px;
+    max-height: calc(100vh - 110px);
+    min-width: 0;
+  }
+  .planner-main {
+    min-width: 0;
+    display: grid;
+    gap: 12px;
+  }
+  .planner-card,
+  .trial-sidebar-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: rgba(255,255,255,0.88);
+    box-shadow: var(--shadow-md);
+    min-width: 0;
+  }
+  .planner-chip-row,
+  .trial-op-card-statuses,
+  .trial-op-card-info,
+  .trial-op-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .planner-chip,
+  .trial-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    background: rgba(59,130,246,0.08);
+    color: #1f3f78;
+  }
+  .planner-chip.good,
+  .trial-pill.green {
+    background: rgba(16,185,129,0.12);
+    color: #0f6b50;
+  }
+  .planner-chip.warn,
+  .trial-pill.yellow {
+    background: rgba(245,158,11,0.14);
+    color: #8a5600;
+  }
+  .planner-machine-filters,
+  .trial-machine-filter {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .planner-filter-chip,
+  .trial-machine-filter-btn {
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.86);
+    color: var(--text2);
+    border-radius: 999px;
+    padding: 7px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+  .planner-filter-chip.active,
+  .trial-machine-filter-btn.active {
+    background: rgba(59,130,246,0.1);
+    color: #184a91;
+    border-color: rgba(59,130,246,0.2);
+  }
+  .planner-machine-list,
+  .trial-grid,
+  .planner-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: stretch;
+  }
+  .planner-machine,
+  .trial-machine {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 22px;
+    border: 1px solid rgba(26,28,29,0.08);
+    background: rgba(255,255,255,0.9);
+    flex: 1 1 320px;
+    max-width: 420px;
+    height: clamp(460px, calc(100vh - 260px), 720px);
+    min-height: 460px;
+    overflow: hidden;
+  }
+  .planner-machine-head,
+  .trial-machine-head {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .planner-machine-title,
+  .trial-machine-title {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+  }
+  .planner-machine-meta,
+  .trial-machine-meta {
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.45;
+  }
+  .planner-machine-lane,
+  .trial-lane {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+    overscroll-behavior: contain;
+  }
+  .planner-block,
+  .trial-block-card {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    height: auto;
+    min-height: 0;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 18px;
+    border: 1px solid rgba(26,28,29,0.08);
+    background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(246,248,250,0.92));
+    cursor: grab;
+  }
+  .planner-block.dragging,
+  .trial-block-card.dragging {
+    opacity: 0.55;
+  }
+  .planner-block-head,
+  .trial-op-card-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .planner-block-title,
+  .trial-block-top {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .planner-block-op,
+  .trial-block-title {
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    overflow-wrap: anywhere;
+  }
+  .planner-block-sub,
+  .trial-block-op {
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .planner-block-meta,
+  .trial-block-qty,
+  .trial-block-meta {
+    text-align: right;
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.35;
+    white-space: nowrap;
+  }
+  .planner-block-chip-row,
+  .trial-op-card-statuses {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .planner-block-seg-summary,
+  .trial-op-card-info {
+    font-size: 11px;
+    color: var(--text3);
+  }
+  .planner-block-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+  .planner-block-dates {
+    display: grid;
+    gap: 4px;
+    padding-top: 2px;
+  }
+  .planner-date-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .planner-date-label {
+    min-width: 54px;
+    font-weight: 900;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .planner-date-value {
+    font-weight: 800;
+    color: var(--text);
+  }
+  .planner-date-status {
+    font-size: 10.5px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text3);
+  }
+  .planner-date-late {
+    color: #b42318;
+    font-weight: 900;
+  }
+  .planner-block-alerts {
+    display: grid;
+    gap: 6px;
+    padding-top: 4px;
+  }
+  .planner-block-alert {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text2);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(245,158,11,0.22);
+    background: rgba(245,158,11,0.06);
+  }
+  .planner-block-alert.warning {
+    border-color: rgba(245,158,11,0.26);
+    background: rgba(245,158,11,0.08);
+  }
+  .planner-block-alert.critical {
+    border-color: rgba(239,68,68,0.24);
+    background: rgba(239,68,68,0.07);
+  }
+  .planner-empty {
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px dashed var(--border);
+    background: rgba(255,255,255,0.75);
+    color: var(--text3);
+    font-size: 13px;
+  }
+  .planner-dropzone {
+    flex: 0 0 auto;
+    min-height: 104px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border: 1px dashed rgba(26,28,29,0.14);
+    background: rgba(248,249,250,0.72);
+    color: var(--text3);
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .planner-drop-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 2px solid rgba(59,130,246,0.18);
+    border-top-color: rgba(59,130,246,0.85);
+    animation: planner-spin 0.75s linear infinite;
+    display: inline-block;
+  }
+  @keyframes planner-spin {
+    to { transform: rotate(360deg); }
+  }
+  @media (max-width: 900px) {
+    .planner-machine,
+    .trial-machine {
+      max-width: none;
+      width: 100%;
+      height: 520px;
+    }
+  }
+  .pl2-sidebar {
+    position: sticky;
+    top: 18px;
+    min-width: 0;
+    align-self: start;
+  }
+  .pl2-sidebar-card {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: rgba(255,255,255,0.92);
+    box-shadow: var(--shadow-md);
+    min-width: 0;
+    overflow: visible;
+  }
+  .pl2-sidebar-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .pl2-sidebar-title {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: -0.04em;
+  }
+  .pl2-sidebar-note {
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.45;
+  }
+  .pl2-sidebar-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .pl2-search {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg2);
+    color: var(--text);
+    padding: 10px 12px;
+    font: inherit;
+  }
+  .pl2-sidebar-list {
+    display: grid;
+    gap: 10px;
+    overflow: visible;
+    max-height: none;
+    padding-right: 0;
+    background: transparent !important;
+    background-image: none !important;
+  }
+  .pl2-ps-card {
+    display: block;
+    border: 1px solid rgba(26,28,29,0.1);
+    border-radius: 18px;
+    background: #fff !important;
+    overflow: visible;
+    box-shadow: 0 8px 18px rgba(26,28,29,0.05);
+    transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+  }
+
+  .pl2-ps-card.is-open {
+    box-shadow: 0 12px 24px rgba(26,28,29,0.08);
+    border-color: rgba(26,28,29,0.14);
+  }
+  .pl2-ps-header {
+    width: 100%;
+    font: inherit;
+    text-align: left;
+    background: rgba(248,249,250,0.95);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 12px;
+    align-items: start;
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(26,28,29,0.08);
+    cursor: pointer;
+  }
+
+  .pl2-ps-action-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pl2-ps-card:not(.is-open) .pl2-ps-header {
+    border-bottom-color: transparent;
+  }
+
+  .pl2-ps-caret {
+    display: inline-block;
+    align-self: center;
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1;
+    padding-top: 2px;
+    transition: transform 140ms ease;
+  }
+
+  .pl2-ps-caret::before {
+    content: "▾";
+  }
+
+  .pl2-ps-card:not(.is-open) .pl2-ps-caret {
+    transform: translateY(-1px);
+  }
+
+  .pl2-ps-card:not(.is-open) .pl2-ps-caret::before {
+    content: "▸";
+  }
+  .pl2-ps-main {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .pl2-ps-title {
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1.15;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .pl2-ps-sub {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .pl2-ps-right {
+    text-align: right;
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+  .pl2-ps-body {
+    display: grid;
+    gap: 9px;
+    padding: 12px 14px;
+    background: #fff;
+    border-top: 1px solid rgba(26,28,29,0.08);
+  }
+  .pl2-ps-panel {
+    display: grid;
+  }
+  .pl2-ps-card:not(.is-open) .pl2-ps-panel {
+    display: none;
+  }
+  .pl2-field {
+    display: grid;
+    gap: 3px;
+  }
+  .pl2-field-label {
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+  .pl2-field-value {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--text);
+    overflow-wrap: anywhere;
+  }
+  .pl2-field-value.desc {
+    color: var(--text2);
+    font-weight: 600;
+  }
+  .pl2-bom-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pl2-bom-label {
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+  .pl2-bom-select {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    font: inherit;
+  }
+  .pl2-timeline {
+    display: grid;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.35;
+  }
+  .pl2-timeline-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .pl2-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .pl2-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 800;
+    background: rgba(30,28,24,0.05);
+    color: var(--text2);
+    border: 1px solid rgba(26,28,29,0.1);
+  }
+  .pl2-chip.good {
+    background: rgba(16,185,129,0.12);
+    color: #0f6b50;
+    border-color: rgba(16,185,129,0.2);
+  }
+  .pl2-op-list {
+    display: grid;
+    gap: 8px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid rgba(26,28,29,0.08);
+    background: rgba(249,248,246,0.92);
+  }
+  .pl2-op {
+    display: grid;
+    gap: 6px;
+    padding: 9px 11px;
+    border-radius: 14px;
+    border: 1px solid rgba(37,99,235,0.14);
+    border-left: 3px solid rgba(37,99,235,0.5);
+    background: #fff;
+    cursor: grab;
+  }
+  .pl2-op-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .pl2-op-title {
+    font-size: 12.5px;
+    font-weight: 850;
+    color: var(--text);
+  }
+  .pl2-op-sub {
+    font-size: 11px;
+    color: var(--text3);
+  }
+  .pl2-op-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .pl2-op-badge {
+    font-size: 9.5px;
+    font-weight: 900;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+  .pl2-op-empty {
+    padding: 9px 11px;
+    border-radius: 12px;
+    color: var(--text3);
+    font-size: 12px;
+    background: rgba(255,255,255,0.65);
+    border: 1px dashed rgba(26,28,29,0.1);
+  }
+  #planner-sidebar-list,
+  #planner-sidebar-list * {
+    background-image: none !important;
+    visibility: visible !important;
+  }
+  #planner-sidebar-list .pl2-ps-card {
+    min-height: 80px !important;
+    color: var(--text) !important;
+  }
+
+  .pl2-ps-body {
+    display: grid;
+  }
+
+  .pl2-op-list {
+    display: grid;
+  }
+
+  .pl2-op {
+    display: grid;
+  }
+
+  .pl2-ps-card.is-open .pl2-ps-header {
+    border-bottom-color: rgba(26,28,29,0.08);
+  }
+
+  .pl2-ps-card:not(.is-open) .pl2-ps-header {
+    border-bottom-color: transparent;
+  }
+  .planner-modal-grid {
+    display: grid;
+    gap: 10px;
+  }
+  .planner-modal-section {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: rgba(248,249,250,0.78);
+  }
+  .planner-modal-section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text3);
+    font-weight: 900;
+  }
+  .planner-modal-lines {
+    display: grid;
+    gap: 6px;
+  }
+  .planner-modal-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(26,28,29,0.06);
+    font-size: 12px;
+  }
+  .planner-modal-line small {
+    color: var(--text3);
+  }
+  @media (max-width: 1100px) {
+    .planner-layout {
+      grid-template-columns: 1fr;
+    }
+    .planner-sidebar {
+      position: static;
+      max-height: none;
+    }
+  }
+  @media (max-width: 820px) {
+    .planner-hero-top {
+      flex-direction: column;
+    }
+    .planner-toolbar-card {
+      width: 100%;
+    }
+  }
+</style>
+
+<div class="trial-shell planner-shell">
+  <div class="planner-toolbar-card trial-toolbar-card">
+    <label>
+      Planning efficiency
+      <input id="planner-eff-input" type="number" min="10" max="150" step="1" value="85">
+    </label>
+    <button class="btn btn-ghost btn-sm" type="button" onclick="savePlannerSettings()">Save</button>
+    <button class="btn btn-primary btn-sm" type="button" onclick="recalculatePlannerBaseline()">Recalculate Plan</button>
+    <button class="btn btn-ghost btn-sm" type="button" onclick="loadPlannerBaseline()">Refresh</button>
+    <span class="badge badge-gray" id="planner-run-badge">Loading...</span>
+    <span class="badge badge-blue" id="planner-policy-badge">Mon-Fri only</span>
+    <div class="planner-toolbar-note">Plan cycle = actual cycle / efficiency.</div>
+  </div>
+
+  <div id="planner-loading" class="loading"><div class="spinner"></div> Loading planner...</div>
+  <div class="trial-layout planner-layout" id="planner-layout" style="display:grid;">
+    <main class="planner-main">
+      <div id="planner-machine-filters" class="planner-machine-filters trial-machine-filter"></div>
+      <div id="planner-grid" class="planner-machine-list trial-grid planner-grid"></div>
+    </main>
+    <aside class="pl2-sidebar">
+      <section class="pl2-sidebar-card">
+        <div class="pl2-sidebar-head">
+          <div>
+            <div class="pl2-sidebar-title">Process Sheets / Ops</div>
+            <div class="pl2-sidebar-note">Search PS, toggle completed items, pick a BOM, then drag an OPN into a machine lane.</div>
+          </div>
+          <div class="pl2-sidebar-actions">
+            <button id="planner-completed-toggle" class="btn btn-ghost btn-sm" type="button" onclick="togglePlannerCompletedCatalog()">Show completed</button>
+          </div>
+        </div>
+        <input id="pl2-search" class="pl2-search" type="search" placeholder="Search PS, part, op..." oninput="plannerHandleSearchInput(this.value)">
+        <div id="planner-sidebar-list" class="pl2-sidebar-list"></div>
+      </section>
+    </aside>
+  </div>
+  <div class="planner-toolbar-note">Plan process-sheet operations into machine lanes. Actual dates are display-only.</div>
+</div>
+
+<div id="planner-modal-shell"></div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+let plannerState = {
+  loading: false,
+  settings: {},
+  planning_run: null,
+  machines: [],
+  blocks: [],
+  segments: [],
+  process_sheets: [],
+  catalog: [],
+  planned: [],
+  planning_cards: [],
+  alerts: [],
+  machineCategoryFilter: 'ALL',
+  search: '',
+  plannerShowCompleted: false,
+};
+let plannerLaneSortables = [];
+let plannerCardRegistry = new Map();
+let plannerOpenPsCards = new Set();
+let plannerSearchTimer = null;
+let plannerDnDInFlight = false;
+let plannerSidebarSortables = [];
+let plannerSidebarPsByKey = new Map();
+let plannerMergeSheetsCache = {
+  processSheets: null,
+  catalog: null,
+  planned: null,
+  merged: null,
+};
+let plannerIndexCache = {
+  blocks: null,
+  blocksByMachine: null,
+  segments: null,
+  segmentsByBlock: null,
+};
+
+function plannerFmtDt(value) {
+  if (!value) return '–';
+  return String(value).replace('T', ' ').slice(0, 16);
+}
+
+function plannerRange(startAt, endAt) {
+  const start = plannerFmtDt(startAt);
+  const end = plannerFmtDt(endAt);
+  return `${start === '–' ? '—' : start} → ${end === '–' ? '—' : end}`;
+}
+
+function plannerParseDateTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const parsed = Date.parse(text.replace(' ', 'T'));
+  return Number.isFinite(parsed) ? new Date(parsed) : null;
+}
+
+// Planned = original baseline chosen by the planner.
+// Current = one user-facing row that combines actual facts and forecast.
+// Backend still keeps expected and actual fields separate.
+// Current start uses actual_start_at if it exists; otherwise forecast start.
+// Current end uses actual_end_at if complete; otherwise forecast end.
+function plannerCurrentStart(block) {
+  return String(
+    block?.actual_start_at
+      || block?.expected_start_at
+      || block?.predicted_start_at
+      || block?.calculated_start_datetime
+      || ''
+  ).trim();
+}
+
+function plannerCurrentEnd(block) {
+  if (block?.actual_end_at) return String(block.actual_end_at).trim();
+  return String(
+    block?.expected_end_at
+      || block?.predicted_end_at
+      || block?.calculated_end_datetime
+      || ''
+  ).trim();
+}
+
+function plannerCurrentStatusLabel(block) {
+  if (block?.actual_end_at) return 'Completed';
+  if (block?.actual_start_at) return 'In progress forecast';
+  return 'Forecast';
+}
+
+function plannerDateLateClass(currentValue, plannedValue) {
+  const current = plannerParseDateTime(currentValue);
+  const planned = plannerParseDateTime(plannedValue);
+  if (!current || !planned) return '';
+  const diffDays = (current.getTime() - planned.getTime()) / (24 * 60 * 60 * 1000);
+  return diffDays > 1 ? 'planner-date-late' : '';
+}
+
+function plannerAlertsForBlock(blockId) {
+  const id = Number(blockId || 0);
+  return (Array.isArray(plannerState.alerts) ? plannerState.alerts : []).filter(alert => Number(alert?.block_id || 0) === id);
+}
+
+function plannerBlockAlertsHtml(block) {
+  const alerts = plannerAlertsForBlock(block.block_id);
+  if (!alerts.length) return '';
+  return `
+    <div class="planner-block-alerts">
+      ${alerts.map(alert => {
+        const type = String(alert.alert_type || '').toUpperCase();
+        const severity = String(alert.severity || '').toLowerCase() === 'critical' ? 'critical' : 'warning';
+        const message = type === 'LOW_OUTPUT_AFTER_3_DAYS'
+          ? 'Output is below expected after 3 days.'
+          : String(alert.message || '');
+        return `
+          <div class="planner-block-alert ${severity}">
+            <div>${escapeHtml(message)}</div>
+            <div class="planner-block-alert-actions">
+              <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); dismissPlannerAlert(${Number(alert.alert_id || 0)})">Dismiss</button>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function plannerUuid() {
+  if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  plannerUuid._counter = (plannerUuid._counter || 0) + 1;
+  return `planner-${Date.now()}-${plannerUuid._counter}`;
+}
+
+function plannerStoreCard(card) {
+  const key = plannerUuid();
+  const stored = { ...card };
+  if (stored.op && typeof stored.op === 'object') {
+    stored.op = {
+      ...stored.op,
+      source_ps_id: String(stored.source_ps_id || stored.op.source_ps_id || '').trim(),
+      pp_partial_no: String(stored.pp_partial_no || stored.op.pp_partial_no || '').trim(),
+      selected_bom_id: Number(stored.selected_bom_id || stored.op.selected_bom_id || 0),
+    };
+  }
+  plannerCardRegistry.set(key, stored);
+  return key;
+}
+
+function plannerGetCard(key) {
+  return plannerCardRegistry.get(String(key || '')) || null;
+}
+
+function plannerHandleError(error, context = 'Planner action failed') {
+  const message = error && error.message ? error.message : String(error || 'Unknown error');
+  toast(`${context}: ${message}`, 'error');
+  return message;
+}
+
+function plannerSetLoadingUi(isLoading) {
+  const layout = document.getElementById('planner-layout');
+  if (layout) {
+    layout.classList.toggle('is-loading', Boolean(isLoading));
+  }
+  const loading = document.getElementById('planner-loading');
+  if (loading) loading.style.display = isLoading ? 'flex' : 'none';
+  const buttons = document.querySelectorAll('button[onclick="recalculatePlannerBaseline()"], button[onclick="loadPlannerBaseline()"]');
+  buttons.forEach(button => {
+    if (button) button.disabled = Boolean(isLoading);
+  });
+}
+
+function plannerSetDragLocked(locked) {
+  plannerDnDInFlight = Boolean(locked);
+  (plannerLaneSortables || []).forEach(sortable => {
+    try {
+      sortable.option('disabled', Boolean(locked));
+    } catch (e) {
+      // ignore
+    }
+  });
+  document.querySelectorAll('.planner-op-source-list').forEach(listEl => {
+    try {
+      listEl.dataset.sortBound = '1';
+      if (listEl._sortable) {
+        listEl._sortable.option('disabled', Boolean(locked));
+      }
+    } catch (e) {
+      // ignore
+    }
+  });
+}
+
+function destroyPlannerSidebarSortables() {
+  (plannerSidebarSortables || []).forEach(instance => {
+    try {
+      instance.destroy();
+    } catch (e) {
+      // ignore
+    }
+  });
+  plannerSidebarSortables = [];
+}
+
+function setPlannerState(patch = {}) {
+  plannerState = { ...plannerState, ...patch };
+  const layout = document.getElementById('planner-layout');
+  if (layout) layout.style.display = 'grid';
+}
+
+function plannerSourcePsId(ps) {
+  return String(ps?.source_ps_id || '').trim();
+}
+
+function plannerPartialNo(ps) {
+  return String(ps?.pp_partial_no || ps?.partial_no || '').trim();
+}
+
+function plannerPsKey(ps) {
+  const source = plannerSourcePsId(ps);
+  const partial = plannerPartialNo(ps);
+  if (!source) return '';
+  return `${source}||${partial}`;
+}
+
+function plannerDisplayPsId(ps) {
+  return plannerSourcePsId(ps) || 'Missing source_ps_id';
+}
+
+function plannerIsPsCardOpen(psKey) {
+  return plannerOpenPsCards.has(String(psKey || '').trim());
+}
+
+function prunePlannerOpenCards(visibleItems) {
+  const valid = new Set((visibleItems || []).map(ps => plannerPsKey(ps)).filter(Boolean));
+  plannerOpenPsCards = new Set([...plannerOpenPsCards].filter(key => valid.has(key)));
+}
+
+function plannerSidebarCardSelector(psKey) {
+  const key = String(psKey || '').trim();
+  if (!key) return null;
+  const escaped = typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function'
+    ? CSS.escape(key)
+    : key.replace(/"/g, '\\"');
+  return `.pl2-ps-card[data-ps-key="${escaped}"]`;
+}
+
+function plannerRenderPsOpListHtml(ps) {
+  const opCards = Array.isArray(ps?.op_cards) ? ps.op_cards : [];
+  const visibleOpCards = plannerVisibleOpCards(ps);
+  console.log('Render OPN list', {
+    key: plannerPsKey(ps),
+    source_ps_id: plannerSourcePsId(ps),
+    op_cards: opCards.length,
+    visible_op_cards: visibleOpCards.length,
+    active_opn_count: Number(ps?.active_opn_count || 0),
+    opn_count: Number(ps?.opn_count || 0),
+  });
+  if (visibleOpCards.length) {
+    return visibleOpCards.map(card => plannerOpCardHtml(ps, card, 0)).join('');
+  }
+  if (opCards.length) {
+    return `<div class="pl2-op-empty">No visible OPN. Raw OPN: ${opCards.length}, visible: ${visibleOpCards.length}</div>`;
+  }
+  return `<div class="pl2-op-empty">No OPN data loaded for this PS.</div>`;
+}
+
+function initPlannerSidebarSortablesForCard(cardEl) {
+  if (typeof Sortable === 'undefined' || !cardEl) return;
+  cardEl.querySelectorAll('.planner-op-source-list').forEach(listEl => {
+    if (!listEl.offsetParent) return;
+    if (listEl._sortable) {
+      try {
+        listEl._sortable.destroy();
+      } catch (e) {
+        // ignore
+      }
+    }
+    listEl._sortable = new Sortable(listEl, {
+      group: { name: 'planner-cards', pull: 'clone', put: false },
+      sort: false,
+      animation: 120,
+      draggable: '.planner-op[data-can-drag="1"]',
+      ghostClass: 'planner-drag-ghost',
+    });
+  });
+}
+
+let plannerSidebarAccordionBound = false;
+
+function bindPlannerSidebarAccordion() {
+  if (plannerSidebarAccordionBound) return;
+  const root = document.getElementById('planner-sidebar-list');
+  if (!root) return;
+  plannerSidebarAccordionBound = true;
+  root.addEventListener('click', event => {
+    const interactive = event.target.closest('button, a, input, select, textarea, label');
+    if (interactive && !interactive.matches('[data-accordion-trigger="1"]')) {
+      return;
+    }
+    const trigger = event.target.closest('[data-accordion-trigger="1"]');
+    if (!trigger || !root.contains(trigger)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const key = String(trigger.dataset.psKey || '').trim();
+    togglePlannerPsCard(key);
+  });
+}
+
+function togglePlannerPsCard(psKey) {
+  const key = String(psKey || '').trim();
+  if (!key) return;
+  const root = document.getElementById('planner-sidebar-list');
+  if (!root) return;
+  const target = root.querySelector(plannerSidebarCardSelector(key));
+  if (!target) return;
+  const currentlyOpen = root.querySelector('.pl2-ps-card.is-open');
+  const targetWasOpen = target.classList.contains('is-open');
+  if (currentlyOpen && currentlyOpen !== target) {
+    currentlyOpen.classList.remove('is-open');
+    currentlyOpen.dataset.open = '0';
+    const currentHeader = currentlyOpen.querySelector('.pl2-ps-header');
+    if (currentHeader) currentHeader.setAttribute('aria-expanded', 'false');
+    const currentList = currentlyOpen.querySelector('.planner-op-source-list');
+    if (currentList) {
+      if (currentList._sortable) {
+        try {
+          currentList._sortable.destroy();
+        } catch (e) {
+          // ignore
+        }
+        currentList._sortable = null;
+      }
+    }
+  }
+  if (targetWasOpen) {
+    target.classList.remove('is-open');
+    target.dataset.open = '0';
+    const header = target.querySelector('.pl2-ps-header');
+    if (header) header.setAttribute('aria-expanded', 'false');
+    const list = target.querySelector('.planner-op-source-list');
+    if (list) {
+      if (list._sortable) {
+        try {
+          list._sortable.destroy();
+        } catch (e) {
+          // ignore
+        }
+        list._sortable = null;
+      }
+    }
+    plannerOpenPsCards.clear();
+    return;
+  }
+  target.classList.add('is-open');
+  target.dataset.open = '1';
+  const header = target.querySelector('.pl2-ps-header');
+  if (header) header.setAttribute('aria-expanded', 'true');
+  plannerOpenPsCards.clear();
+  plannerOpenPsCards.add(key);
+  const list = target.querySelector('.planner-op-source-list');
+  const ps = plannerSidebarPsByKey.get(key);
+  if (list && ps) {
+    list.innerHTML = plannerRenderPsOpListHtml(ps);
+    initPlannerSidebarSortablesForCard(target);
+  }
+}
+
+function plannerExecutionLabel(ps) {
+  return String(ps?.execution_label || ps?.planner_status || ps?.status || '').trim();
+}
+
+function plannerOpnCount(ps) {
+  return Number(ps?.opn_count || (Number(ps?.active_opn_count || 0) + Number(ps?.completed_opn_count || 0)) || (ps?.op_cards || []).length || 0);
+}
+
+function plannerFormatOpn(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'OPN';
+  const cleaned = raw.replace(/^OPN\s*/i, '').replace(/^OP\s*/i, '').trim();
+  return cleaned ? `OPN ${cleaned}` : 'OPN';
+}
+
+function plannerBomOptions(ps) {
+  return Array.isArray(ps?.bom_options) ? ps.bom_options : [];
+}
+
+function plannerDefaultBomId(ps) {
+  const options = plannerBomOptions(ps);
+  if (!options.length) return 0;
+  const defaultOption = options.find(option => Boolean(option.is_default));
+  return Number((defaultOption || options[0] || {}).bom_id || 0);
+}
+
+function plannerSelectedBomId(ps) {
+  const explicit = Number(ps?.selected_bom_id || 0);
+  if (explicit) return explicit;
+  const defaultId = Number(ps?.default_bom_id || plannerDefaultBomId(ps) || 0);
+  return defaultId;
+}
+
+function plannerSelectedBomCode(ps) {
+  const selected = plannerSelectedBomId(ps);
+  const option = plannerBomOptions(ps).find(item => Number(item.bom_id || 0) === Number(selected || 0));
+  return String(ps?.selected_bom_code || option?.bom_code || '').trim();
+}
+
+function plannerBool(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  const text = String(value ?? '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'y', 'completed', 'done'].includes(text);
+}
+
+function plannerIsCompleted(ps) {
+  return plannerBool(ps?.is_completed || ps?.completed || ps?.process_completed)
+    || String(ps?.planner_status || '').toUpperCase() === 'COMPLETED'
+    || String(ps?.execution_label || '').toUpperCase() === 'COMPLETED';
+}
+
+function plannerBlocksForMachine(machineId) {
+  const map = plannerBlocksByMachineMap();
+  return map.get(Number(machineId || 0)) || [];
+}
+
+function plannerSegmentsForBlock(blockId) {
+  const map = plannerSegmentsByBlockMap();
+  return map.get(Number(blockId || 0)) || [];
+}
+
+function plannerBlocksByMachineMap() {
+  const blocks = plannerState.blocks || [];
+  if (plannerIndexCache.blocks === blocks && plannerIndexCache.blocksByMachine) {
+    return plannerIndexCache.blocksByMachine;
+  }
+  const map = new Map();
+  blocks.forEach(block => {
+    const machineId = Number(block.machine_id || 0);
+    if (!map.has(machineId)) map.set(machineId, []);
+    map.get(machineId).push(block);
+  });
+  map.forEach(list => {
+    list.sort((a, b) => Number(a.queue_position || 0) - Number(b.queue_position || 0) || Number(a.block_id || 0) - Number(b.block_id || 0));
+  });
+  plannerIndexCache.blocks = blocks;
+  plannerIndexCache.blocksByMachine = map;
+  return map;
+}
+
+function plannerSegmentsByBlockMap() {
+  const segments = plannerState.segments || [];
+  if (plannerIndexCache.segments === segments && plannerIndexCache.segmentsByBlock) {
+    return plannerIndexCache.segmentsByBlock;
+  }
+  const map = new Map();
+  segments.forEach(seg => {
+    const blockId = Number(seg.block_id || 0);
+    if (!map.has(blockId)) map.set(blockId, []);
+    map.get(blockId).push(seg);
+  });
+  map.forEach(list => {
+    list.sort((a, b) => String(a.start_datetime || '').localeCompare(String(b.start_datetime || '')) || Number(a.planning_segment_id || 0) - Number(b.planning_segment_id || 0));
+  });
+  plannerIndexCache.segments = segments;
+  plannerIndexCache.segmentsByBlock = map;
+  return map;
+}
+
+function plannerSearchTextFromPs(ps) {
+  return [
+    ps.ps_id,
+    ps.source_ps_id,
+    ps.partial_no,
+    ps.pp_partial_no,
+    ps.part_name,
+    ps.part_no,
+    ps.part_desc,
+    ps.due_date,
+    ps.status,
+    ps.planner_status,
+    ps.execution_label,
+    plannerSelectedBomCode(ps),
+    (plannerBomOptions(ps) || []).map(option => `${option.bom_code} ${option.bom_name}`).join(' '),
+    ps.expected_start_at,
+    ps.expected_end_at,
+    ps.actual_start_at,
+    ps.actual_end_at,
+    ...(Array.isArray(ps.op_cards) ? ps.op_cards.flatMap(card => [
+      card.opn_label,
+      card.operation_label,
+      card.operation_name,
+      card.source_op_no,
+      card.compatible_machine_group,
+      card.machine_category,
+    ]) : []),
+  ].join(' ').toLowerCase();
+}
+
+function plannerMergeSheets() {
+  const processSheets = plannerState.process_sheets || [];
+  const catalog = plannerState.catalog || [];
+  const planned = plannerState.planned || [];
+  if (
+    plannerMergeSheetsCache.processSheets === processSheets &&
+    plannerMergeSheetsCache.catalog === catalog &&
+    plannerMergeSheetsCache.planned === planned &&
+    plannerMergeSheetsCache.merged
+  ) {
+    return plannerMergeSheetsCache.merged;
+  }
+  const map = new Map();
+  processSheets.forEach(ps => {
+    const sourcePsId = plannerSourcePsId(ps);
+    const psKey = plannerPsKey(ps);
+    map.set(psKey, {
+      ...ps,
+      source_ps_id: sourcePsId,
+      partial_no: plannerPartialNo(ps),
+      pp_partial_no: plannerPartialNo(ps),
+      part_no: String(ps.part_no || '').trim(),
+      part_desc: String(ps.part_desc || '').trim(),
+      total_qty: Number(ps.total_qty || 0),
+      partial_qty: Number(ps.partial_qty || ps.planned_qty || ps.total_qty || 0),
+      opn_count: Number(ps.opn_count || 0),
+      is_completed: plannerBool(ps.is_completed || ps.completed || ps.process_completed),
+      completed: plannerBool(ps.completed || ps.is_completed || ps.process_completed),
+      completed_at: String(ps.completed_at || ps.process_completed_at || ''),
+      completed_by: String(ps.completed_by || ps.process_completed_by || ''),
+      execution_label: plannerExecutionLabel(ps),
+      op_cards: Array.isArray(ps.op_cards) ? ps.op_cards : [],
+      flow_options: Array.isArray(ps.flow_options) ? ps.flow_options : [],
+      bom_options: Array.isArray(ps.bom_options) ? ps.bom_options : [],
+      planning_cards: Array.isArray(ps.planning_cards) ? ps.planning_cards : [],
+      source: 'process_sheet',
+      search_text: plannerSearchTextFromPs(ps),
+    });
+  });
+  const mergeItems = (items, sourceName) => {
+    (items || []).forEach(ps => {
+      const key = plannerPsKey(ps);
+      const existing = map.get(key) || {
+        source_ps_id: key,
+        partial_no: plannerPartialNo(ps),
+        pp_partial_no: plannerPartialNo(ps),
+        part_id: Number(ps.part_id || 0),
+        part_name: ps.part_name || '',
+        part_no: ps.part_no || '',
+        part_desc: ps.part_desc || '',
+        due_date: ps.due_date || '',
+        total_qty: Number(ps.total_qty || 0),
+        partial_qty: Number(ps.partial_qty || ps.planned_qty || ps.total_qty || 0),
+        status: ps.status || '',
+        planner_status: ps.planner_status || '',
+        execution_label: plannerExecutionLabel(ps),
+        expected_start_at: ps.expected_start_at || '',
+        expected_end_at: ps.expected_end_at || '',
+        actual_start_at: ps.actual_start_at || '',
+        actual_end_at: ps.actual_end_at || '',
+        planned_qty: Number(ps.planned_qty || 0),
+        planned_minutes: Number(ps.planned_minutes || 0),
+        opn_count: Number(ps.opn_count || 0),
+        is_completed: plannerBool(ps.is_completed || ps.completed || ps.process_completed),
+        completed: plannerBool(ps.completed || ps.is_completed || ps.process_completed),
+        completed_at: String(ps.completed_at || ps.process_completed_at || ''),
+        completed_by: String(ps.completed_by || ps.process_completed_by || ''),
+        op_cards: Array.isArray(ps.op_cards) ? ps.op_cards : [],
+        flow_options: Array.isArray(ps.flow_options) ? ps.flow_options : [],
+        bom_options: Array.isArray(ps.bom_options) ? ps.bom_options : [],
+        planning_cards: Array.isArray(ps.planning_cards) ? ps.planning_cards : [],
+      };
+      existing.part_id = Number(ps.part_id || existing.part_id || 0);
+      existing.part_name = ps.part_name || existing.part_name || '';
+      existing.part_no = ps.part_no || existing.part_no || '';
+      existing.part_desc = ps.part_desc || existing.part_desc || '';
+      existing.due_date = ps.due_date || existing.due_date || '';
+      existing.total_qty = Number(ps.total_qty || existing.total_qty || 0);
+      existing.partial_qty = Number(ps.partial_qty || ps.planned_qty || existing.partial_qty || existing.planned_qty || existing.total_qty || 0);
+      existing.status = ps.status || existing.status || '';
+      existing.planner_status = ps.planner_status || existing.planner_status || '';
+      existing.execution_label = plannerExecutionLabel(ps) || existing.execution_label || '';
+      existing.selected_bom_id = Number(ps.selected_bom_id || existing.selected_bom_id || 0);
+      existing.selected_bom_code = ps.selected_bom_code || existing.selected_bom_code || '';
+      existing.expected_start_at = ps.expected_start_at || existing.expected_start_at || '';
+      existing.expected_end_at = ps.expected_end_at || existing.expected_end_at || '';
+      existing.actual_start_at = ps.actual_start_at || existing.actual_start_at || '';
+      existing.actual_end_at = ps.actual_end_at || existing.actual_end_at || '';
+      existing.planned_qty = Number(ps.planned_qty || existing.planned_qty || 0);
+      existing.planned_minutes = Number(ps.planned_minutes || existing.planned_minutes || 0);
+      existing.opn_count = Number(ps.opn_count || existing.opn_count || 0);
+      existing.source_ps_id = plannerSourcePsId(ps) || existing.source_ps_id || '';
+      existing.partial_no = plannerPartialNo(ps) || existing.partial_no || '';
+      existing.pp_partial_no = plannerPartialNo(ps) || existing.pp_partial_no || '';
+      existing.is_completed = plannerBool(ps.is_completed || ps.completed || ps.process_completed || existing.is_completed);
+      existing.completed = existing.is_completed;
+      existing.completed_at = String(ps.completed_at || ps.process_completed_at || existing.completed_at || '');
+      existing.completed_by = String(ps.completed_by || ps.process_completed_by || existing.completed_by || '');
+      if (Array.isArray(ps.op_cards) && ps.op_cards.length) {
+        existing.op_cards = ps.op_cards.map(card => ({ ...card, source: sourceName }));
+      }
+      if (Array.isArray(ps.flow_options) && ps.flow_options.length) {
+        existing.flow_options = ps.flow_options;
+      }
+      if (Array.isArray(ps.bom_options) && ps.bom_options.length) {
+        existing.bom_options = ps.bom_options;
+      }
+      if (Array.isArray(ps.planning_cards) && ps.planning_cards.length) {
+        existing.planning_cards = ps.planning_cards;
+      }
+      existing.material_status = ps.material_status || existing.material_status || {};
+      existing.search_text = plannerSearchTextFromPs(existing);
+      map.set(key, existing);
+    });
+  };
+  mergeItems(catalog, 'catalog');
+  mergeItems(planned, 'planned');
+  const merged = Array.from(map.values()).sort((a, b) => {
+    const dueCompare = String(a.due_date || '').localeCompare(String(b.due_date || ''));
+    return dueCompare || String(a.source_ps_id || '').localeCompare(String(b.source_ps_id || ''));
+  });
+  plannerMergeSheetsCache = {
+    processSheets,
+    catalog,
+    planned,
+    merged,
+  };
+  return merged;
+}
+
+function plannerMatchesSearch(ps, search) {
+  if (!search) return true;
+  const haystack = String(ps?.search_text || plannerSearchTextFromPs(ps) || '').toLowerCase();
+  return haystack.includes(search);
+}
+
+function togglePlannerCompletedCatalog() {
+  setPlannerState({ plannerShowCompleted: !plannerState.plannerShowCompleted });
+  renderPlannerSidebar();
+}
+
+function plannerHandleSearchInput(value) {
+  clearTimeout(plannerSearchTimer);
+  plannerSearchTimer = setTimeout(() => {
+    const nextValue = String(value || '').trim().toLowerCase();
+    if (nextValue === String(plannerState.search || '')) return;
+    setPlannerState({ search: nextValue });
+    renderPlannerSidebar();
+  }, 150);
+}
+
+async function selectPlannerBom(sourcePsId, partialNo, bomId) {
+  const numericBomId = Number(bomId || 0);
+  if (!sourcePsId) return;
+  try {
+    await POST(`/api/trial/planner/source-ps/${encodeURIComponent(sourcePsId)}/bom`, {
+      pp_partial_no: String(partialNo || '').trim(),
+      bom_id: numericBomId,
+    });
+    await loadPlannerBaseline();
+    toast('BOM saved.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'BOM save failed');
+  }
+}
+
+async function togglePlannerOpnCompletion(operationId, completed, sourcePsId = '', partialNo = '', sourceOpSeqId = 0, sourceOpNo = '', bomId = 0) {
+  const numericOperationId = Number(operationId || 0);
+  if (!numericOperationId) {
+    plannerHandleError(new Error('Missing OPN identifier.'), 'OPN completion failed');
+    return;
+  }
+  try {
+    await POST(`/api/trial/planner/opn/${numericOperationId}/completion`, {
+      completed: Boolean(completed),
+      source_ps_id: sourcePsId || '',
+      pp_partial_no: partialNo || '',
+      source_op_seq_id: Number(sourceOpSeqId || 0),
+      source_op_no: sourceOpNo || '',
+      bom_id: Number(bomId || 0),
+    });
+    await loadPlannerBaseline();
+    toast(Boolean(completed) ? 'OPN marked complete.' : 'OPN marked active.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'OPN completion failed');
+  }
+}
+
+async function togglePlannerPsCompletion(sourcePsId, partialNo, completed) {
+  const normalizedSourcePsId = String(sourcePsId || '').trim();
+  if (!normalizedSourcePsId) {
+    plannerHandleError(new Error('Missing PS identifier.'), 'PS completion failed');
+    return;
+  }
+  try {
+    await POST(`/api/trial/planner/source-ps/${encodeURIComponent(normalizedSourcePsId)}/completion`, {
+      pp_partial_no: String(partialNo || '').trim(),
+      completed: Boolean(completed),
+    });
+    await loadPlannerBaseline();
+    toast(Boolean(completed) ? 'PS marked complete.' : 'PS marked active.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'PS completion failed');
+  }
+}
+
+async function alignPlannerAlertStart(alertId) {
+  const numericAlertId = Number(alertId || 0);
+  if (!numericAlertId) {
+    plannerHandleError(new Error('Missing alert identifier.'), 'Alert action failed');
+    return;
+  }
+  try {
+    await POST(`/api/trial/planner/alerts/${numericAlertId}/align-start`, {});
+    await loadPlannerBaseline();
+    toast('Planned start aligned to actual start.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Alert action failed');
+  }
+}
+
+async function dismissPlannerAlert(alertId) {
+  const numericAlertId = Number(alertId || 0);
+  if (!numericAlertId) {
+    plannerHandleError(new Error('Missing alert identifier.'), 'Alert action failed');
+    return;
+  }
+  try {
+    await POST(`/api/trial/planner/alerts/${numericAlertId}/dismiss`, {});
+    await loadPlannerBaseline();
+    toast('Alert dismissed.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Alert action failed');
+  }
+}
+
+function plannerOpCardChildren(card) {
+  return Array.isArray(card?.ops) ? card.ops : [];
+}
+
+function plannerOpCardVisible(card) {
+  return true;
+}
+
+function plannerOpCardToggleLabel(card) {
+  return plannerBool(card?.is_completed) ? 'Mark active' : 'Mark complete';
+}
+
+function plannerCompletedToggleLabel() {
+  return plannerState.plannerShowCompleted ? 'Hide completed' : 'Show completed';
+}
+
+function plannerVisibleOpCards(ps) {
+  return Array.isArray(ps?.op_cards) ? ps.op_cards : [];
+}
+
+function plannerVisibleOpnCount(ps) {
+  const visibleOpCards = plannerVisibleOpCards(ps);
+  if (visibleOpCards.length) return visibleOpCards.length;
+  const activeCount = Number(ps?.active_opn_count);
+  if (Number.isFinite(activeCount)) {
+    return Math.max(0, activeCount);
+  }
+  return plannerOpnCount(ps);
+}
+
+function plannerOpCardHtml(ps, card, depth = 0) {
+  if (!card || !plannerOpCardVisible(card)) return '';
+  const isGroup = card.card_kind === 'group';
+  const isCompleted = plannerBool(card?.is_completed);
+  const planningStatus = String(card?.planning_status || '').toUpperCase();
+  const targetQty = Number(card?.target_qty || 0);
+  const plannedQty = Number(card?.planned_qty || 0);
+  const remainingQty = Number(card?.remaining_qty || 0);
+  const fullyPlanned = planningStatus === 'FULLY_PLANNED' || remainingQty <= 0 || card.can_drag === false;
+  const partiallyPlanned = planningStatus === 'PARTIALLY_PLANNED';
+  const statusLabel = isCompleted ? 'COMPLETED' : (fullyPlanned ? 'FULLY PLANNED' : partiallyPlanned ? 'PARTIALLY PLANNED' : 'UNPLANNED');
+  const canDrag = !isGroup && card.can_drag !== false && !fullyPlanned && !isCompleted;
+  const visibleChildren = isGroup
+    ? plannerOpCardChildren(card)
+    : [];
+  const title = isGroup
+    ? (card.operation_label || 'Combined OPN')
+    : plannerFormatOpn(card.opn_label || card.source_op_no || card.operation_label || card.op_type || 'OPN');
+  const sub = isGroup
+    ? `${plannerVisibleOpnCount(card)} OPN · Qty ${fmt(card.target_qty || 0, 0)}`
+    : `${card.op_type || card.operation_name || ''}`;
+  const completionButton = !isGroup && card.can_toggle_completion !== false
+    ? `<button class="btn btn-ghost btn-sm" type="button" onclick="event.stopPropagation(); togglePlannerOpnCompletion(${Number(card.operation_id || 0)}, ${plannerBool(card.is_completed) ? 'false' : 'true'}, '${escapeHtml(card.source_ps_id || ps.source_ps_id || '')}', '${escapeHtml(card.pp_partial_no || plannerPartialNo(ps) || '')}', ${Number(card.source_op_seq_id || 0)}, '${escapeHtml(card.source_op_no || '')}', ${Number(card.selected_bom_id || plannerSelectedBomId(ps) || 0)})">${escapeHtml(plannerOpCardToggleLabel(card))}</button>`
+    : '';
+  const cardKey = plannerStoreCard({
+    card_kind: card.card_kind || 'single',
+    card_id: card.card_id || null,
+    op: card.op ? {
+      ...card.op,
+      source_ps_id: card.source_ps_id || card.op.source_ps_id || ps.source_ps_id || '',
+      pp_partial_no: String(card.pp_partial_no || card.op.pp_partial_no || plannerPartialNo(ps) || ''),
+      selected_bom_id: Number(card.selected_bom_id || card.op.selected_bom_id || plannerSelectedBomId(ps) || 0),
+    } : null,
+    source_ps_id: card.source_ps_id || ps.source_ps_id || '',
+    source_op_seq_id: Number(card.source_op_seq_id || 0),
+    source_op_no: card.source_op_no || '',
+    target_qty: Number(remainingQty || targetQty || 0),
+    display_target_qty: Number(targetQty || 0),
+    planned_qty: Number(plannedQty || 0),
+    remaining_qty: Number(remainingQty || 0),
+    planning_status: planningStatus || 'UNPLANNED',
+    can_drag: canDrag,
+    selected_bom_id: Number(card.selected_bom_id || plannerSelectedBomId(ps) || 0),
+    pp_partial_no: String(card.pp_partial_no || plannerPartialNo(ps) || ''),
+  });
+  const debugIdentity = {
+    source_ps_id: String(card.source_ps_id || ps.source_ps_id || ''),
+    pp_partial_no: String(card.pp_partial_no || plannerPartialNo(ps) || ''),
+    selected_bom_id: Number(card.selected_bom_id || plannerSelectedBomId(ps) || 0),
+    source_op_seq_id: Number(card.source_op_seq_id || 0),
+    source_op_no: String(card.source_op_no || ''),
+    planned_qty: Number(plannedQty || 0),
+    target_qty: Number(targetQty || 0),
+    remaining_qty: Number(remainingQty || 0),
+  };
+  const childHtml = isGroup && visibleChildren.length
+    ? `<div class="pl2-op-list">${visibleChildren.map(child => plannerOpCardHtml(ps, child, depth + 1)).join('')}</div>`
+    : '';
+  return `
+    <div class="pl2-op planner-op ${isCompleted ? 'is-completed' : ''}${fullyPlanned ? ' is-fully-planned is-planned' : ''}${partiallyPlanned ? ' is-partially-planned' : ''}" data-card-key="${escapeHtml(cardKey)}" data-can-drag="${canDrag ? '1' : '0'}" data-debug-identity="${escapeHtml(JSON.stringify(debugIdentity))}" draggable="${canDrag ? 'true' : 'false'}"${depth > 0 ? ` style="margin-left:${Math.min(12, depth * 4)}px"` : ''}>
+      <div class="pl2-op-top">
+        <div>
+          <div class="pl2-op-title">${escapeHtml(title)}</div>
+          <div class="pl2-op-sub">${escapeHtml(sub)}</div>
+        </div>
+        <div class="pl2-op-actions">
+          <span class="pl2-op-badge">${isGroup ? 'Group' : 'OPN'}</span>
+          ${completionButton}
+        </div>
+      </div>
+      <div class="pl-pill-row">
+        <span class="pl-pill">Qty ${fmt(targetQty, 0)}</span>
+        <span class="pl-pill good">Planned ${fmt(plannedQty, 0)}</span>
+        <span class="pl-pill ${remainingQty > 0 ? 'warn' : 'neutral'}">Remaining ${fmt(remainingQty, 0)}</span>
+        <span class="pl-pill">Setup ${fmt(card.setup_minutes || card.setup_time || 0, 0)}m</span>
+        <span class="pl-pill">Cycle ${fmt(card.cycle_minutes_per_qty || card.cycle_time || 0, 2)}m/pc</span>
+        <span class="pl-pill">${escapeHtml(statusLabel)}</span>
+      </div>
+      ${childHtml}
+    </div>
+  `;
+}
+
+function renderPlannerSettings() {
+  const settings = plannerState.settings || {};
+  document.getElementById('planner-policy-badge').textContent = String(settings.planning_calendar_policy || 'Mon-Fri only');
+  document.getElementById('planner-run-badge').textContent = plannerState.planning_run
+    ? `${String(plannerState.planning_run.status || 'CURRENT')} run #${plannerState.planning_run.planning_run_id || '--'}`
+    : 'No planning run';
+  const eff = Number(settings.planning_efficiency || 0.85);
+  const effInput = document.getElementById('planner-eff-input');
+  if (effInput && !Number.isNaN(eff)) effInput.value = String(Math.round(eff * 100));
+}
+
+function renderPlannerAlerts() {
+  const root = document.getElementById('planner-alerts');
+  if (!root) return;
+  const alerts = Array.isArray(plannerState.alerts) ? plannerState.alerts : [];
+  if (!alerts.length) {
+    root.innerHTML = `<div class="planner-alerts-empty">No active alerts.</div>`;
+    return;
+  }
+  root.innerHTML = alerts.map(alert => {
+    const alertType = String(alert.alert_type || '').toUpperCase();
+    const severityClass = String(alert.severity || '').toUpperCase() === 'CRITICAL' ? 'alert-critical' : 'alert-warning';
+    const title = alertType === 'LOW_OUTPUT_AFTER_3_DAYS' ? 'Low output after 3 days' : 'Start drift alert';
+    const psLabel = escapeHtml(alert.ps_id || '—');
+    const opLabel = escapeHtml(alert.source_op_no || '—');
+    const message = escapeHtml(alert.message || '');
+    const actions = alertType === 'START_DRIFT'
+      ? `
+        <button class="btn btn-primary btn-sm" type="button" onclick="alignPlannerAlertStart(${Number(alert.alert_id || 0)})">Align planned start to actual start</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="dismissPlannerAlert(${Number(alert.alert_id || 0)})">Dismiss</button>
+      `
+      : `<button class="btn btn-ghost btn-sm" type="button" onclick="dismissPlannerAlert(${Number(alert.alert_id || 0)})">Dismiss</button>`;
+    const metrics = alertType === 'LOW_OUTPUT_AFTER_3_DAYS'
+      ? `
+        <div class="planner-alert-meta">Expected qty by now: <strong>${fmt(alert.expected_qty_by_now || 0, 0)}</strong></div>
+        <div class="planner-alert-meta">Actual good qty: <strong>${fmt(alert.actual_good_qty || 0, 0)}</strong></div>
+        <div class="planner-alert-meta">Output efficiency: <strong>${fmt((Number(alert.output_efficiency || 0) * 100), 1)}%</strong></div>
+      `
+      : `
+        <div class="planner-alert-meta">Expected start: <strong>${escapeHtml(plannerFmtDt(alert.expected_start_at || alert.planned_at || ''))}</strong></div>
+        <div class="planner-alert-meta">Actual start: <strong>${escapeHtml(plannerFmtDt(alert.actual_start_at || ''))}</strong></div>
+        <div class="planner-alert-meta">Drift: <strong>${fmt(Number(alert.drift_hours || 0), 1)} hours</strong></div>
+      `;
+    return `
+      <section class="planner-alert-card ${severityClass}" data-alert-id="${Number(alert.alert_id || 0)}">
+        <div class="planner-alert-head">
+          <div class="planner-alert-title">
+            <strong>${escapeHtml(title)}</strong>
+            <div class="planner-alert-meta">${escapeHtml(alert.severity || 'INFO')} · ${escapeHtml(alert.status || 'ACTIVE')} · PS ${psLabel} · OPN ${opLabel}</div>
+          </div>
+          <span class="pl-pill ${severityClass === 'alert-critical' ? 'warn' : 'neutral'}">${escapeHtml(String(alert.alert_type || '').replace(/_/g, ' '))}</span>
+        </div>
+        <div class="planner-alert-body">
+          ${metrics}
+          <div class="planner-alert-meta">${message}</div>
+        </div>
+        <div class="planner-alert-actions">
+          ${actions}
+        </div>
+      </section>
+    `;
+  }).join('');
+}
+
+function renderPlannerSidebar() {
+  const root = document.getElementById('planner-sidebar-list');
+  if (!root) return;
+  plannerCardRegistry.clear();
+  destroyPlannerSidebarSortables();
+  plannerSidebarPsByKey = new Map();
+  const toggleBtn = document.getElementById('planner-completed-toggle');
+  if (toggleBtn) toggleBtn.textContent = plannerCompletedToggleLabel();
+  const search = String(document.getElementById('pl2-search')?.value || plannerState.search || '').trim().toLowerCase();
+  plannerState.search = search;
+  const items = plannerMergeSheets().filter(ps => plannerMatchesSearch(ps, search));
+  const visibleItems = plannerState.plannerShowCompleted ? items : items.filter(ps => !plannerIsCompleted(ps));
+  const keyCounts = new Map();
+  visibleItems.forEach(ps => {
+    const key = plannerPsKey(ps);
+    keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+  });
+  const duplicateKeys = Array.from(keyCounts.entries()).filter(([key, count]) => !key || count > 1);
+  if (duplicateKeys.length) {
+    console.warn('Planner duplicate/blank frontend PS keys', duplicateKeys);
+  }
+  prunePlannerOpenCards(items);
+  if (!plannerOpenPsCards.size && visibleItems.length) {
+    const firstOpen = visibleItems.find(ps => !plannerIsCompleted(ps)) || visibleItems[0];
+    if (firstOpen) plannerOpenPsCards.add(plannerPsKey(firstOpen));
+  }
+  if (!visibleItems.length) {
+    root.innerHTML = plannerState.process_sheets && plannerState.process_sheets.length
+      ? `<div class="planner-empty">No active process sheets.<br>Use "Show completed" to view completed items.</div>`
+      : `<div class="planner-empty">No process sheets found.</div>`;
+    bindPlannerSidebarAccordion();
+    return;
+  }
+  root.innerHTML = visibleItems.map(ps => {
+    const opCards = Array.isArray(ps.op_cards) ? ps.op_cards : [];
+    const displaySourcePsId = plannerDisplayPsId(ps);
+    const sourcePsId = plannerSourcePsId(ps);
+    const psKey = plannerPsKey(ps);
+    if (!psKey) {
+      return `
+      <div class="planner-empty pl2-ps-card pl2-ps-card-error">
+        Missing source_ps_id for backend ps_id: ${escapeHtml(ps.ps_id || '—')}
+      </div>
+      `;
+    }
+    const selectedBomId = plannerSelectedBomId(ps);
+    const bomOptions = plannerBomOptions(ps);
+    const visibleOpCards = plannerVisibleOpCards(ps);
+    const visibleOpCount = visibleOpCards.length || Number(ps.active_opn_count || 0);
+    const isCompleted = plannerIsCompleted(ps);
+    const cardOpen = plannerIsPsCardOpen(psKey);
+    plannerSidebarPsByKey.set(psKey, ps);
+    const bomOptionsHtml = bomOptions.length
+      ? bomOptions.map(option => `
+          <option value="${Number(option.bom_id || 0)}" ${Number(option.bom_id || 0) === Number(selectedBomId || 0) ? 'selected' : ''}>
+            ${escapeHtml(option.bom_code || option.bom_name || `BOM ${option.bom_id}`)}${option.is_default ? ' (default)' : ''}
+          </option>
+        `).join('')
+      : '<option value="0">No BOM</option>';
+    const totalLabel = `Total Qty ${fmt(ps.total_qty || 0, 0)}`;
+    const partialLabel = `Partial Qty ${fmt(ps.partial_qty || 0, 0)}`;
+    const opnLabel = `${visibleOpCount ? `${fmt(visibleOpCount, 0)} OPN` : 'No OPN'}`;
+    const opHtml = cardOpen ? plannerRenderPsOpListHtml(ps) : '';
+    return `
+    <div class="pl2-ps-card ${cardOpen ? 'is-open' : ''}" data-ps-id="${escapeHtml(displaySourcePsId || '')}" data-ps-key="${escapeHtml(psKey || '')}" data-source-ps-id="${escapeHtml(sourcePsId || '')}" data-pp-partial-no="${escapeHtml(ps.pp_partial_no || ps.partial_no || '')}" data-backend-ps-id="${escapeHtml(ps.ps_id || '')}" data-rendered="1" data-open="${cardOpen ? '1' : '0'}">
+      <div class="pl2-ps-header" data-accordion-trigger="1" data-ps-key="${escapeHtml(psKey || '')}" role="button" tabindex="0" aria-expanded="${cardOpen ? 'true' : 'false'}">
+        <div class="pl2-ps-main">
+          <div class="pl2-ps-title">${escapeHtml(displaySourcePsId || '—')}</div>
+          <div class="pl2-ps-sub">Partial No: ${escapeHtml(ps.partial_no || '—')}</div>
+        </div>
+        <div class="pl2-ps-right">
+          <div>Due: ${escapeHtml(plannerFmtDt(ps.due_date || ''))}</div>
+          <div>${escapeHtml(String(ps.execution_label || ps.planner_status || ps.status || ''))}</div>
+        </div>
+        <span class="pl2-ps-caret" aria-hidden="true"></span>
+      </div>
+      <div class="pl2-ps-panel">
+        <div class="pl2-ps-body">
+          <div class="pl2-field">
+            <div class="pl2-field-label">Part No</div>
+            <div class="pl2-field-value">${escapeHtml(ps.part_no || '—')}</div>
+          </div>
+          <div class="pl2-field">
+            <div class="pl2-field-label">Part Desc</div>
+            <div class="pl2-field-value desc">${escapeHtml(ps.part_desc || '—')}</div>
+          </div>
+          <div class="pl2-bom-row">
+            <span class="pl2-bom-label">BOM</span>
+            <select class="pl2-bom-select" onchange="event.stopPropagation(); selectPlannerBom('${escapeHtml(sourcePsId || '')}', '${escapeHtml(ps.pp_partial_no || ps.partial_no || '')}', this.value)">
+              ${bomOptionsHtml}
+            </select>
+          </div>
+          <div class="pl2-timeline">
+            <div class="pl2-timeline-row">
+              <span>Expected</span>
+              <span>${escapeHtml(plannerRange(ps.expected_start_at || '', ps.expected_end_at || ''))}</span>
+            </div>
+            <div class="pl2-timeline-row">
+              <span>Actual</span>
+              <span>${escapeHtml(plannerRange(ps.actual_start_at || '', ps.actual_end_at || ''))}</span>
+            </div>
+          </div>
+          <div class="pl2-chip-row">
+            <span class="pl2-chip">${totalLabel}</span>
+            <span class="pl2-chip good">${partialLabel}</span>
+            <span class="pl2-chip ${visibleOpCount ? 'good' : ''}">${opnLabel}</span>
+            <span class="pl2-chip">${escapeHtml(String(ps.execution_label || ps.planner_status || ps.status || ''))}</span>
+          </div>
+          <div class="pl2-ps-action-row">
+            <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); togglePlannerPsCompletion('${escapeHtml(sourcePsId || '')}', '${escapeHtml(ps.pp_partial_no || ps.partial_no || '')}', ${isCompleted ? 'false' : 'true'})">${escapeHtml(isCompleted ? 'Mark PS active' : 'Mark PS complete')}</button>
+          </div>
+        </div>
+        <div class="pl2-op-list planner-op-source-list" data-ps-id="${escapeHtml(displaySourcePsId || '')}" data-ps-key="${escapeHtml(psKey || '')}" data-source-ps-id="${escapeHtml(sourcePsId || '')}" data-pp-partial-no="${escapeHtml(ps.pp_partial_no || ps.partial_no || '')}" data-backend-ps-id="${escapeHtml(ps.ps_id || '')}" data-op-cards-count="${opCards.length}" data-visible-op-cards-count="${visibleOpCards.length}">
+          ${opHtml}
+        </div>
+      </div>
+    </div>
+    `;
+  }).join('');
+  const openCard = root.querySelector('.pl2-ps-card.is-open');
+  if (openCard) initPlannerSidebarSortablesForCard(openCard);
+  bindPlannerSidebarAccordion();
+}
+
+function renderPlannerMachineFilters() {
+  const root = document.getElementById('planner-machine-filters');
+  if (!root) return;
+  const categories = ['ALL', ...new Set((plannerState.machines || []).map(m => String(m.machine_category || '').trim()).filter(Boolean))];
+  root.innerHTML = categories.map(category => `
+    <button type="button" class="pl-filter-chip planner-filter-chip trial-machine-filter-btn ${plannerState.machineCategoryFilter === category ? 'active' : ''}" onclick="setPlannerMachineCategoryFilter('${escapeHtml(category)}')">${escapeHtml(category === 'ALL' ? 'All machines' : category)}</button>
+  `).join('');
+}
+
+function setPlannerMachineCategoryFilter(category) {
+  setPlannerState({ machineCategoryFilter: String(category || 'ALL') });
+  renderPlannerMachineFilters();
+  renderPlannerMachines();
+  initPlannerLaneSortables();
+}
+
+function plannerVisibleMachines() {
+  const filter = String(plannerState.machineCategoryFilter || 'ALL');
+  return (plannerState.machines || []).filter(machine => {
+    if (filter === 'ALL') return true;
+    return String(machine.machine_category || '') === filter;
+  });
+}
+
+function plannerBlockHtml(block) {
+  const segments = plannerSegmentsForBlock(block.block_id);
+  const segmentCount = segments.length;
+  const plannedStart = block.planned_start_at || block.expected_start_at || block.predicted_start_at || block.calculated_start_datetime || '';
+  const plannedEnd = block.planned_end_at || block.expected_end_at || block.predicted_end_at || block.calculated_end_datetime || '';
+  const currentStart = plannerCurrentStart(block);
+  const currentEnd = plannerCurrentEnd(block);
+  const currentStatus = plannerCurrentStatusLabel(block);
+  const currentStartLateClass = plannerDateLateClass(currentStart, plannedStart);
+  const currentEndLateClass = plannerDateLateClass(currentEnd, plannedEnd);
+  const isAnchored = Number(block.allow_pull_forward ?? 1) === 0 || Boolean(block.anchor_datetime);
+  const anchorLabel = block.anchor_datetime ? `Anchor ${plannerFmtDt(block.anchor_datetime)}` : 'Anchored';
+  return `
+    <div class="planner-block trial-block-card" draggable="true" data-block-id="${Number(block.block_id || 0)}" data-machine-id="${Number(block.machine_id || 0)}" onclick="openPlannerBlockDetail(${Number(block.block_id || 0)})" title="Click for planning details">
+      <div class="planner-block-head trial-op-card-header">
+        <div class="planner-block-title trial-block-top">
+          <div class="planner-block-op trial-block-title">${escapeHtml(block.job_no || '')}${block.source_op_no ? ` · OP${escapeHtml(block.source_op_no)}` : ''}</div>
+          <div class="planner-block-sub trial-block-op">${escapeHtml(block.operation_name || '')}</div>
+          <div class="planner-block-actions">
+            <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); openPlannerSplitModal(${Number(block.block_id || 0)})">Split</button>
+            <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); openPlannerAnchorModal(${Number(block.block_id || 0)})">${isAnchored ? 'Edit Anchor' : 'Set Anchor'}</button>
+            ${isAnchored ? `<button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); clearPlannerAnchor(${Number(block.block_id || 0)})">Clear Anchor</button>` : ''}
+          </div>
+        </div>
+        <div class="planner-block-meta trial-block-meta">
+          <div>${escapeHtml(block.machine_code || '')}</div>
+          <div>Queue ${fmt(block.queue_position || 0, 1)}</div>
+        </div>
+      </div>
+      <div class="planner-block-dates">
+        <div class="planner-date-row">
+          <span class="planner-date-label">Planned</span>
+          <span class="planner-date-value">${escapeHtml(plannerRange(plannedStart, plannedEnd))}</span>
+        </div>
+        <div class="planner-date-row">
+          <span class="planner-date-label">Current</span>
+          <span class="planner-date-value">
+            <span class="${escapeHtml(currentStartLateClass)}">${escapeHtml(plannerFmtDt(currentStart))}</span>
+            →
+            <span class="${escapeHtml(currentEndLateClass)}">${escapeHtml(plannerFmtDt(currentEnd))}</span>
+          </span>
+          <span class="planner-date-status">${escapeHtml(currentStatus)}</span>
+        </div>
+      </div>
+      ${plannerBlockAlertsHtml(block)}
+      <div class="planner-chip-row trial-op-card-statuses">
+        <span class="trial-pill">Qty ${fmt(block.planned_qty || block.scheduled_qty || 0, 0)}</span>
+        <span class="trial-pill">Plan ${fmt(block.planned_minutes || 0, 0)}m</span>
+        ${isAnchored ? `<span class="trial-pill yellow">${escapeHtml(anchorLabel)}</span>` : ''}
+      </div>
+      <div class="planner-block-seg-summary">${segmentCount ? `${segmentCount} planning segment${segmentCount === 1 ? '' : 's'} · tap for details` : 'No planning segments'}</div>
+    </div>
+  `;
+}
+
+function plannerToDateTimeLocal(value) {
+  if (!value) return '';
+  return String(value).replace(' ', 'T').slice(0, 16);
+}
+
+function plannerFromDateTimeLocal(value) {
+  const compact = String(value || '').trim();
+  if (!compact) return '';
+  if (compact.includes('T')) return compact.replace('T', ' ') + ':00';
+  return compact;
+}
+
+function openPlannerAnchorModal(blockId) {
+  const block = (plannerState.blocks || []).find(item => Number(item.block_id || 0) === Number(blockId || 0));
+  if (!block) return;
+  const current = block.anchor_datetime
+    || block.planned_start_at
+    || block.expected_start_at
+    || block.calculated_start_datetime
+    || '';
+  openModal('Set Planner Anchor', `
+    <div class="planner-modal-grid">
+      <div class="planner-modal-section">
+        <div class="planner-modal-section-title">Anchor</div>
+        <label class="field">
+          Anchor start datetime
+          <input id="planner-anchor-datetime" type="datetime-local" value="${escapeHtml(plannerToDateTimeLocal(current))}">
+        </label>
+        <div class="planner-card-note">
+          Anchored blocks cannot be pulled earlier than this datetime. They can still move later if previous work spills over.
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" type="button" onclick="submitPlannerAnchor(${Number(blockId || 0)})">Save Anchor</button>
+    </div>
+  `);
+}
+
+async function submitPlannerAnchor(blockId) {
+  const raw = document.getElementById('planner-anchor-datetime')?.value || '';
+  const anchorDatetime = plannerFromDateTimeLocal(raw);
+  if (!anchorDatetime) {
+    toast('Anchor datetime is required.', 'error');
+    return;
+  }
+  try {
+    await PUT(`/api/trial/blocks/${Number(blockId || 0)}`, {
+      anchor_datetime: anchorDatetime,
+      planned_start_at: anchorDatetime,
+      allow_pull_forward: 0,
+    });
+    closeModal();
+    await loadPlannerBaseline();
+    toast('Anchor saved.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Anchor save failed');
+  }
+}
+
+async function clearPlannerAnchor(blockId) {
+  try {
+    await PUT(`/api/trial/blocks/${Number(blockId || 0)}`, {
+      anchor_datetime: '',
+      allow_pull_forward: 1,
+    });
+    await loadPlannerBaseline();
+    toast('Anchor cleared.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Clear anchor failed');
+  }
+}
+
+function openPlannerSplitModal(blockId) {
+  const block = (plannerState.blocks || []).find(item => String(item.block_id) === String(blockId));
+  if (!block) return;
+  const scheduledQty = Number(block.scheduled_qty || block.planned_qty || 0);
+  const defaultSplitQty = Math.max(1, Math.floor(scheduledQty / 2));
+  openModal('Split Planned Block', `
+    <div class="planner-modal-grid">
+      <div class="planner-modal-section">
+        <div class="planner-modal-section-title">Split</div>
+        <label class="field">
+          Split quantity
+          <input id="planner-split-qty" type="number" min="1" step="1" value="${defaultSplitQty}">
+        </label>
+        <div class="planner-card-note">
+          Original block keeps the split quantity. The remainder becomes a new planned block after it.
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" type="button" onclick="submitPlannerSplit(${Number(blockId)})">Split</button>
+    </div>
+  `);
+}
+
+async function submitPlannerSplit(blockId) {
+  const qty = Number(document.getElementById('planner-split-qty')?.value || 0);
+  if (!qty || qty <= 0) {
+    toast('Split quantity is required.', 'error');
+    return;
+  }
+  try {
+    await POST(`/api/trial/blocks/${Number(blockId)}/split`, {
+      split_qty: qty,
+      source: 'PLANNER',
+    });
+    closeModal();
+    await loadPlannerBaseline();
+    toast('Planned block split.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Split failed');
+  }
+}
+
+function plannerPendingBlockHtml() {
+  return `
+    <div class="planner-block trial-block-card planner-block-pending" style="cursor:progress;opacity:0.82">
+      <div class="planner-block-head trial-op-card-header">
+        <div class="planner-block-title trial-block-top">
+          <div class="planner-block-op trial-block-title">Planning operation</div>
+          <div class="planner-block-sub trial-block-op">Scheduling in progress</div>
+        </div>
+        <div class="planner-block-meta trial-block-meta">
+          <span class="planner-drop-spinner"></span>
+        </div>
+      </div>
+      <div class="planner-block-seg-summary">Creating block...</div>
+    </div>
+  `;
+}
+
+function renderPlannerMachines() {
+  const root = document.getElementById('planner-grid');
+  if (!root) return;
+  const machines = plannerVisibleMachines();
+  if (!machines.length) {
+    root.innerHTML = `<div class="planner-empty">No machines available.</div>`;
+    return;
+  }
+  root.innerHTML = machines.map(machine => {
+    const blocks = plannerBlocksForMachine(machine.machine_id);
+    const totalMinutes = blocks.reduce((sum, block) => sum + Number(block.planned_minutes || 0), 0);
+    const blockHtml = blocks.length ? blocks.map(plannerBlockHtml).join('') : `<div class="planner-dropzone">Drop an operation here</div>`;
+    return `
+      <article class="planner-machine trial-machine">
+        <div class="planner-machine-head trial-machine-head">
+          <div>
+            <div class="planner-machine-title">${escapeHtml(machine.machine_code || '')}</div>
+            <div class="planner-machine-meta">${escapeHtml(machine.machine_category || '')}${machine.shift_profile ? ` · ${escapeHtml(machine.shift_profile)}` : ''}</div>
+          </div>
+          <div class="planner-machine-meta" style="text-align:right">
+            <div>Total planned minutes</div>
+            <div style="font-size:18px;font-weight:900;color:var(--text)">${fmt(totalMinutes, 0)} min</div>
+          </div>
+        </div>
+        <div class="planner-machine-lane trial-lane" data-planner-lane="1" data-machine-id="${Number(machine.machine_id || 0)}">
+          ${blockHtml}
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+function renderPlannerBoard() {
+  renderPlannerSettings();
+  renderPlannerMachineFilters();
+  renderPlannerSidebar();
+  renderPlannerMachines();
+  const layout = document.getElementById('planner-layout');
+  if (layout) layout.style.display = 'grid';
+  initPlannerLaneSortables();
+}
+
+function plannerSetPendingDropCard(item, machineId) {
+  if (!item) return;
+  item.className = 'planner-block trial-block-card planner-block-pending';
+  item.dataset.blockId = `pending-${plannerUuid()}`;
+  item.dataset.machineId = String(machineId || 0);
+  item.innerHTML = `
+    <div class="planner-block-head trial-op-card-header">
+      <div class="planner-block-title trial-block-top">
+        <div class="planner-block-op trial-block-title">Planning operation</div>
+        <div class="planner-block-sub trial-block-op">Scheduling in progress</div>
+      </div>
+      <div class="planner-block-meta trial-block-meta">
+        <span class="planner-drop-spinner"></span>
+      </div>
+    </div>
+    <div class="planner-block-seg-summary">Creating block...</div>
+  `;
+}
+
+function destroyPlannerLaneSortables() {
+  (plannerLaneSortables || []).forEach(instance => {
+    try {
+      instance.destroy();
+    } catch (e) {
+      // ignore
+    }
+  });
+  plannerLaneSortables = [];
+}
+
+async function schedulePlannerSingleOpCard(card, machineId, queuePosition = 0, options = {}) {
+  const op = card && card.op;
+  if (!op) {
+    plannerHandleError(new Error('Missing operation data for this card.'), 'Plan failed');
+    return;
+  }
+  try {
+    await POST('/api/trial/planner/schedule-opn', {
+      source_ps_id: card.source_ps_id || op.source_ps_id || '',
+      pp_partial_no: String(card.pp_partial_no || op.pp_partial_no || '').trim(),
+      source_op_seq_id: Number(card.source_op_seq_id || op.source_op_seq_id || 0),
+      source_op_no: card.source_op_no || op.source_op_no || '',
+      selected_bom_id: Number(card.selected_bom_id || op.selected_bom_id || 0),
+      machine_id: Number(machineId || 0),
+      queue_position: Number(queuePosition || 0),
+      scheduled_qty: Number(card.remaining_qty || card.target_qty || op.remaining_qty || op.total_qty || 0),
+    });
+    if (options.reload !== false) {
+      await loadPlannerBaseline();
+    }
+    if (options.toast !== false) {
+      toast('Operation planned', 'success');
+    }
+  } catch (e) {
+    plannerHandleError(e, 'Plan failed');
+  }
+}
+
+async function schedulePlannerCombinedOpCard(cardId, machineId, queuePosition = 0, options = {}) {
+  const numericCardId = Number(cardId || 0);
+  if (!numericCardId) {
+    plannerHandleError(new Error('Missing combined operation card.'), 'Plan failed');
+    return;
+  }
+  try {
+    await POST(`/api/trial/planning-cards/${numericCardId}/schedule`, {
+      machine_id: Number(machineId || 0),
+      queue_position: Number(queuePosition || 0),
+    });
+    if (options.reload !== false) {
+      await loadPlannerBaseline();
+    }
+    if (options.toast !== false) {
+      toast('Operations planned', 'success');
+    }
+  } catch (e) {
+    plannerHandleError(e, 'Plan failed');
+  }
+}
+
+function openPlannerBlockDetail(blockId) {
+  const block = (plannerState.blocks || []).find(item => Number(item.block_id || 0) === Number(blockId || 0));
+  if (!block) return;
+  const segments = plannerSegmentsForBlock(blockId);
+  const segmentHtml = segments.length ? segments.map(seg => `
+    <div class="planner-modal-line">
+      <div>
+        <strong>${escapeHtml(seg.segment_type || 'production')}</strong><br>
+        <small>${escapeHtml(plannerFmtDt(seg.start_datetime))} → ${escapeHtml(plannerFmtDt(seg.end_datetime))}</small>
+      </div>
+      <div>${escapeHtml(`${fmt(seg.planned_qty || 0, 0)} pcs · ${fmt(seg.planned_minutes || 0, 0)} min`)}</div>
+    </div>
+  `).join('') : `<div class="planner-empty">No planning segments for this block.</div>`;
+  openModal('Planned Block', `
+    <div class="planner-modal-grid">
+      <div class="planner-modal-section">
+        <div class="planner-modal-section-title">Block</div>
+        <div class="planner-modal-lines">
+          <div class="planner-modal-line"><span>PS / Job</span><strong>${escapeHtml(block.job_no || block.source_ps_id || '')}</strong></div>
+          <div class="planner-modal-line"><span>Operation</span><strong>${escapeHtml(block.source_op_no || block.operation_name || '')}</strong></div>
+          <div class="planner-modal-line"><span>Machine</span><strong>${escapeHtml(block.machine_code || '')}</strong></div>
+          <div class="planner-modal-line"><span>Queue</span><strong>${fmt(block.queue_position || 0, 1)}</strong></div>
+          <div class="planner-modal-line"><span>Planned</span><strong>${escapeHtml(plannerRange(block.expected_start_at, block.expected_end_at))}</strong></div>
+          <div class="planner-modal-line"><span>Current</span><strong>${escapeHtml(plannerRange(plannerCurrentStart(block), plannerCurrentEnd(block)))}</strong></div>
+          <div class="planner-modal-line"><span>Forecast</span><strong>${escapeHtml(plannerRange(block.expected_start_at || block.predicted_start_at || block.planned_start_at, block.expected_end_at || block.predicted_end_at || block.planned_end_at))}</strong></div>
+          <div class="planner-modal-line"><span>Actual</span><strong>${escapeHtml(plannerRange(block.actual_start_at, block.actual_end_at))}</strong></div>
+        </div>
+      </div>
+      <div class="planner-modal-section">
+        <div class="planner-modal-section-title">Segments</div>
+        <div class="planner-modal-lines">
+          ${segmentHtml}
+        </div>
+        <div class="planner-modal-actions" style="justify-content:flex-start">
+          <button class="btn btn-ghost btn-sm" type="button" id="planner-unschedule-btn">Unschedule</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="planner-modal-close-btn">Close</button>
+        </div>
+      </div>
+    </div>
+  `, 'lg');
+  setTimeout(() => {
+    document.getElementById('planner-unschedule-btn')?.addEventListener('click', async () => {
+      try {
+        await DEL(`/api/trial/blocks/${Number(block.block_id || 0)}`);
+        closeModal();
+        await loadPlannerBaseline();
+        toast('Block unscheduled.', 'success');
+      } catch (e) {
+        plannerHandleError(e, 'Unschedule failed');
+      }
+    });
+    document.getElementById('planner-modal-close-btn')?.addEventListener('click', closeModal);
+  }, 0);
+}
+
+function initPlannerLaneSortables() {
+  if (typeof Sortable === 'undefined') return;
+  destroyPlannerLaneSortables();
+  document.querySelectorAll('.planner-machine-lane').forEach(lane => {
+    const sortable = new Sortable(lane, {
+      group: { name: 'planner-cards', pull: true, put: true },
+      animation: 150,
+      draggable: '.planner-block',
+      handle: '.planner-block',
+      ghostClass: 'planner-drag-ghost',
+      chosenClass: 'planner-drag-chosen',
+      dragClass: 'planner-drag-active',
+      fallbackOnBody: true,
+      swapThreshold: 0.65,
+      onAdd: async evt => {
+        if (plannerDnDInFlight) return;
+        const existingBlockId = Number(evt.item?.dataset?.blockId || 0);
+        const isExistingBlockMove = evt.item?.classList?.contains('planner-block') && Number.isFinite(existingBlockId) && existingBlockId > 0;
+        if (isExistingBlockMove) {
+          evt.item.dataset.justMovedExistingBlock = '1';
+          const sourceLane = evt.from;
+          const targetLane = evt.to;
+          try {
+            plannerSetDragLocked(true);
+            if (sourceLane && sourceLane !== targetLane) {
+              await savePlannerOrder(sourceLane, false);
+            }
+            await savePlannerOrder(targetLane, false);
+            await loadPlannerBaseline();
+            toast('Block moved.', 'success');
+          } catch (e) {
+            plannerHandleError(e, 'Move failed');
+            await loadPlannerBaseline();
+          } finally {
+            plannerSetDragLocked(false);
+          }
+          return;
+        }
+        const payload = plannerGetCard(evt.item?.dataset?.cardKey || '');
+        if (!payload) {
+          plannerHandleError(new Error('Missing operation data for this card.'), 'Plan failed');
+          evt.item?.remove();
+          return;
+        }
+        const machineId = Number(lane.dataset.machineId || 0);
+        const queuePosition = Math.max(10, (lane.querySelectorAll('.planner-block').length || 0) * 10);
+        try {
+          plannerSetDragLocked(true);
+          plannerSetPendingDropCard(evt.item, machineId);
+          if (payload.card_kind === 'group') {
+            await schedulePlannerCombinedOpCard(payload.card_id, machineId, queuePosition, { reload: false, toast: false });
+          } else if (payload.card_kind === 'single') {
+            await schedulePlannerSingleOpCard(payload, machineId, queuePosition, { reload: false, toast: false });
+          }
+          await loadPlannerBaseline();
+          toast('Operation planned', 'success');
+        } catch (e) {
+          plannerHandleError(e, 'Plan failed');
+          await loadPlannerBaseline();
+        } finally {
+          plannerSetDragLocked(false);
+        }
+      },
+      onEnd: async evt => {
+        if (plannerDnDInFlight) return;
+        if (evt.item?.dataset?.justMovedExistingBlock === '1') {
+          delete evt.item.dataset.justMovedExistingBlock;
+          return;
+        }
+        if (!evt.item || !evt.item.classList.contains('planner-block')) return;
+        const fromLane = evt.from;
+        const toLane = evt.to;
+        if (!fromLane || !toLane) return;
+        try {
+          plannerSetDragLocked(true);
+          if (fromLane !== toLane) {
+            await savePlannerOrder(fromLane, false);
+          }
+          await savePlannerOrder(toLane, false);
+          await loadPlannerBaseline();
+        } catch (e) {
+          plannerHandleError(e, 'Reorder failed');
+          await loadPlannerBaseline();
+        } finally {
+          plannerSetDragLocked(false);
+        }
+      },
+    });
+    plannerLaneSortables.push(sortable);
+  });
+}
+
+async function savePlannerOrder(lane, reload = true) {
+  const cards = Array.from(lane.querySelectorAll('.planner-block'));
+  const machineId = Number(lane.dataset.machineId || 0);
+  const orderedIds = cards
+    .map(card => Number(card.dataset.blockId || 0))
+    .filter(id => Number.isFinite(id) && id > 0);
+  if (!machineId || !orderedIds.length) return;
+  try {
+    await POST(`/api/trial/blocks/${orderedIds[0]}/reorder`, {
+      machine_id: machineId,
+      ordered_ids: orderedIds,
+    });
+    if (reload) {
+      await loadPlannerBaseline();
+      toast('Queue order saved', 'success');
+    }
+  } catch (e) {
+    plannerHandleError(e, 'Reorder failed');
+  }
+}
+
+async function loadPlannerBaseline() {
+  try {
+    plannerSetLoadingUi(true);
+    const loading = document.getElementById('planner-loading');
+    if (loading) {
+      loading.style.display = 'flex';
+      loading.innerHTML = '<div class="spinner"></div> Loading planner...';
+    }
+    const data = await GET('/api/trial/planner/schedule');
+    setPlannerState({
+      planning_run: data.planning_run || null,
+      settings: data.settings || {},
+      machines: data.machines || [],
+      blocks: data.blocks || [],
+      segments: data.segments || [],
+      process_sheets: data.process_sheets || [],
+      catalog: data.catalog || [],
+      planned: data.planned || [],
+      planning_cards: data.planning_cards || [],
+      alerts: data.alerts || [],
+      loading: false,
+    });
+    renderPlannerBoard();
+    if (loading) loading.style.display = 'none';
+    plannerSetLoadingUi(false);
+  } catch (e) {
+    setPlannerState({ loading: false });
+    plannerHandleError(e, 'Planner load failed');
+    const grid = document.getElementById('planner-grid');
+    const sidebar = document.getElementById('planner-sidebar-list');
+    const loading = document.getElementById('planner-loading');
+    const endpoint = '/api/trial/planner/schedule';
+    if (loading) {
+      loading.style.display = 'flex';
+      loading.innerHTML = `<div class="spinner"></div> Planner load failed from ${escapeHtml(endpoint)}: ${escapeHtml(e && e.message ? e.message : 'Unknown error')}`;
+    }
+    if (grid) grid.innerHTML = `<div class="planner-empty">Failed to load planner.</div>`;
+    if (sidebar) sidebar.innerHTML = `<div class="planner-empty">Failed to load planner.</div>`;
+    const layout = document.getElementById('planner-layout');
+    if (layout) layout.style.display = 'grid';
+    document.querySelectorAll('button[onclick="recalculatePlannerBaseline()"], button[onclick="loadPlannerBaseline()"]').forEach(button => {
+      if (button) button.disabled = false;
+    });
+  }
+}
+
+async function savePlannerSettings() {
+  const raw = document.getElementById('planner-eff-input')?.value;
+  const eff = Number(raw);
+  if (!Number.isFinite(eff)) {
+    toast('Planning efficiency must be numeric.', 'error');
+    return;
+  }
+  try {
+    const result = await PATCH('/api/trial/planner/settings', {
+      planning_efficiency: eff > 1 ? eff / 100 : eff,
+      recalculate: 0,
+    });
+    setPlannerState({ settings: result.settings || plannerState.settings });
+    renderPlannerSettings();
+    toast('Planning efficiency saved.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Save failed');
+  }
+}
+
+async function recalculatePlannerBaseline() {
+  try {
+    await POST('/api/trial/planner/recalculate', { reason: 'PLANNER_UI' });
+    await loadPlannerBaseline();
+    toast('Plan recalculated.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Recalculate failed');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', loadPlannerBaseline);
+</script>
+{% endblock %}

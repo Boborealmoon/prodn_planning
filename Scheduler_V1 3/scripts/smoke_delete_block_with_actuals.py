@@ -30,7 +30,7 @@ def _insert_temp_block(con, machine_id, tag, planned_end_at):
             VALUES (?, ?)
             RETURNING part_id
             """,
-            (f"SMOKE-DEL-PART-{tag}", "Delete smoke part"),
+            (f"SMOKE-DEL-ACT-PART-{tag}", "Delete smoke part"),
         )
     )
     bom = one(
@@ -40,7 +40,7 @@ def _insert_temp_block(con, machine_id, tag, planned_end_at):
             VALUES (?, ?, ?, 1)
             RETURNING bom_id
             """,
-            (int(part["part_id"]), f"SMOKE-DEL-BOM-{tag}", "Delete smoke BOM"),
+            (int(part["part_id"]), f"SMOKE-DEL-ACT-BOM-{tag}", "Delete smoke BOM"),
         )
     )
     seq = one(
@@ -63,13 +63,13 @@ def _insert_temp_block(con, machine_id, tag, planned_end_at):
             RETURNING operation_id
             """,
             (
-                f"SMOKE-DEL-{tag}",
-                f"Delete Smoke {tag}",
+                f"SMOKE-DEL-ACT-{tag}",
+                f"Delete Actual Smoke {tag}",
                 10,
                 60,
                 30,
                 "SMOKE",
-                f"SMOKE-DEL-PS::{tag}",
+                f"SMOKE-DEL-ACT-PS::{tag}",
                 int(seq["op_seq_id"]),
                 "10",
             ),
@@ -103,22 +103,8 @@ def _insert_temp_block(con, machine_id, tag, planned_end_at):
     }
 
 
-def _cleanup_temp_block(con, ids):
-    block_id = int(ids["block_id"])
-    operation_id = int(ids["operation_id"])
-    op_seq_id = int(ids["op_seq_id"])
-    bom_id = int(ids["bom_id"])
-    part_id = int(ids["part_id"])
-
-    con.execute("DELETE FROM production_actual WHERE block_id = ?", (block_id,))
-    con.execute("DELETE FROM schedule_alert WHERE block_id = ?", (block_id,))
-    con.execute("DELETE FROM machine_queue_state WHERE block_id = ?", (block_id,))
-    con.execute("DELETE FROM run_block_segment WHERE block_id = ?", (block_id,))
-    con.execute("DELETE FROM run_block WHERE block_id = ?", (block_id,))
-    con.execute("DELETE FROM operation WHERE operation_id = ?", (operation_id,))
-    con.execute("DELETE FROM operation_seq WHERE op_seq_id = ?", (op_seq_id,))
-    con.execute("DELETE FROM bom_variation WHERE bom_id = ?", (bom_id,))
-    con.execute("DELETE FROM parts WHERE part_id = ?", (part_id,))
+def _fetch_block_ids(payload):
+    return {int(item.get("block_id") or 0) for item in (payload.get("blocks") or []) if int(item.get("block_id") or 0)}
 
 
 def main():
@@ -139,32 +125,7 @@ def main():
         machine_id = int(machine["machine_id"])
         tag = uuid4().hex[:8]
         ids = _insert_temp_block(con, machine_id, tag, "2099-01-01 08:31:00")
-        recalculate_machine(con, machine_id, reason="SMOKE_DELETE_CLEAN_BLOCK")
-
-    delete_resp = client.delete(f"/api/trial/blocks/{ids['block_id']}")
-    if delete_resp.status_code != 200:
-        return fail(f"delete clean block failed: {delete_resp.status_code} {delete_resp.get_data(as_text=True)}")
-
-    with db() as con:
-        for table, query in (
-            ("run_block", "SELECT block_id FROM run_block WHERE block_id = ?"),
-            ("run_block_segment", "SELECT segment_id FROM run_block_segment WHERE block_id = ?"),
-            ("machine_queue_state", "SELECT block_id FROM machine_queue_state WHERE block_id = ?"),
-            ("schedule_alert", "SELECT alert_id FROM schedule_alert WHERE block_id = ?"),
-        ):
-            row = one(con.execute(query, (ids["block_id"],)))
-            if row:
-                return fail(f"{table} row still exists after delete")
-    pass_msg("clean delete removes run_block, segments, queue state, and alerts")
-
-    with db() as con:
-        machine = one(con.execute("SELECT machine_id FROM machines WHERE active = 1 ORDER BY machine_id LIMIT 1"))
-        if not machine:
-            return fail("no active machine found for rejection test")
-        machine_id = int(machine["machine_id"])
-        tag = uuid4().hex[:8]
-        ids_reject = _insert_temp_block(con, machine_id, tag, "2099-01-01 08:31:00")
-        recalculate_machine(con, machine_id, reason="SMOKE_DELETE_REJECT")
+        recalculate_machine(con, machine_id, reason="SMOKE_DELETE_WITH_ACTUALS")
         con.execute(
             """
             INSERT INTO production_actual (
@@ -173,28 +134,62 @@ def main():
             ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'ACTIVE', 'MANUAL', '')
             """,
             (
-                ids_reject["block_id"],
+                ids["block_id"],
                 machine_id,
                 "2099-01-01",
-                "smoke delete rejection",
+                "smoke delete with actuals",
                 1.0,
                 0.0,
                 1.0,
             ),
         )
+        actual_before = one(
+            con.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM production_actual
+                WHERE block_id = ?
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                """,
+                (ids["block_id"],),
+            )
+        )
+        if int((actual_before or {})["cnt"] if actual_before else 0) <= 0:
+            return fail("failed to seed active actuals for delete smoke")
 
-    reject_resp = client.delete(f"/api/trial/blocks/{ids_reject['block_id']}")
-    if reject_resp.status_code == 200:
-        return fail("delete unexpectedly succeeded for block with active actuals")
+    delete_resp = client.delete(f"/api/trial/blocks/{ids['block_id']}")
+    if delete_resp.status_code != 200:
+        return fail(f"delete with actuals failed: {delete_resp.status_code} {delete_resp.get_data(as_text=True)}")
 
     with db() as con:
-        block = one(con.execute("SELECT block_id FROM run_block WHERE block_id = ?", (ids_reject["block_id"],)))
-        if not block:
-            return fail("block with active actuals disappeared after rejected delete")
-        _cleanup_temp_block(con, ids_reject)
-    pass_msg("delete rejects blocks with active actuals and leaves them intact")
+        block_row = one(con.execute("SELECT block_id FROM run_block WHERE block_id = ?", (ids["block_id"],)))
+        if block_row:
+            return fail("run_block row still exists after delete")
+        actual_row = one(
+            con.execute(
+                """
+                SELECT actual_id
+                FROM production_actual
+                WHERE block_id = ?
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                LIMIT 1
+                """,
+                (ids["block_id"],),
+            )
+        )
+        if actual_row:
+            return fail("active production_actual row still exists after delete")
 
-    print("PASS: smoke_scheduler_delete_clean_block completed successfully")
+    for path in ("/api/trial/schedule", "/api/trial/planner/schedule"):
+        resp = client.get(path)
+        if resp.status_code != 200:
+            return fail(f"GET {path} returned {resp.status_code}")
+        payload = resp.get_json() or {}
+        if ids["block_id"] in _fetch_block_ids(payload):
+            return fail(f"{path} still returns deleted block")
+    pass_msg("deleted block is absent from both schedule APIs")
+
+    print("PASS: smoke_delete_block_with_actuals completed successfully")
     return 0
 
 

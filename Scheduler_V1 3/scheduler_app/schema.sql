@@ -195,6 +195,17 @@ CREATE TABLE IF NOT EXISTS production_actual (
   target_qty_at_report REAL
 );
 
+CREATE TABLE IF NOT EXISTS block_removed_actual_date (
+  removed_date_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  block_id INTEGER NOT NULL REFERENCES run_block(block_id) ON DELETE CASCADE,
+  report_date TEXT NOT NULL,
+  target_qty_removed REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(block_id, report_date)
+);
+
 CREATE TABLE IF NOT EXISTS planning_card (
   card_id INTEGER PRIMARY KEY AUTOINCREMENT,
   ps_id TEXT NOT NULL REFERENCES process_sheet(ps_id) ON DELETE CASCADE,
@@ -218,6 +229,72 @@ CREATE TABLE IF NOT EXISTS planning_card_operation (
   setup_minutes REAL NOT NULL DEFAULT 0,
   cycle_minutes_per_qty REAL NOT NULL DEFAULT 0,
   target_qty REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS planning_setting (
+  setting_key TEXT PRIMARY KEY,
+  setting_value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS planning_schedule_run (
+  planning_run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reason TEXT NOT NULL DEFAULT 'PLANNER_RECALCULATE',
+  status TEXT NOT NULL DEFAULT 'CURRENT',
+  planning_efficiency REAL NOT NULL DEFAULT 0.85,
+  calendar_policy TEXT NOT NULL DEFAULT 'MON_FRI_ONLY',
+  generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  notes TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS planning_schedule_segment (
+  planning_segment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  planning_run_id INTEGER NOT NULL REFERENCES planning_schedule_run(planning_run_id) ON DELETE CASCADE,
+  block_id INTEGER NOT NULL REFERENCES run_block(block_id) ON DELETE CASCADE,
+  operation_id INTEGER NOT NULL REFERENCES operation(operation_id) ON DELETE CASCADE,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  segment_date TEXT NOT NULL,
+  segment_type TEXT NOT NULL DEFAULT 'production',
+  planned_qty REAL NOT NULL DEFAULT 0,
+  planned_minutes REAL NOT NULL DEFAULT 0,
+  start_datetime TEXT NOT NULL,
+  end_datetime TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS planning_block_state (
+  block_id INTEGER PRIMARY KEY REFERENCES run_block(block_id) ON DELETE CASCADE,
+  planning_run_id INTEGER REFERENCES planning_schedule_run(planning_run_id) ON DELETE SET NULL,
+  expected_start_at TEXT,
+  expected_end_at TEXT,
+  planned_qty REAL NOT NULL DEFAULT 0,
+  planned_minutes REAL NOT NULL DEFAULT 0,
+  machine_id INTEGER,
+  operation_id INTEGER,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS planning_operation_state (
+  operation_id INTEGER PRIMARY KEY REFERENCES operation(operation_id) ON DELETE CASCADE,
+  planning_run_id INTEGER REFERENCES planning_schedule_run(planning_run_id) ON DELETE SET NULL,
+  ps_id TEXT NOT NULL DEFAULT '',
+  expected_start_at TEXT,
+  expected_end_at TEXT,
+  planned_qty REAL NOT NULL DEFAULT 0,
+  planned_minutes REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS planning_process_sheet_state (
+  ps_id TEXT PRIMARY KEY REFERENCES process_sheet(ps_id) ON DELETE CASCADE,
+  planning_run_id INTEGER REFERENCES planning_schedule_run(planning_run_id) ON DELETE SET NULL,
+  expected_start_at TEXT,
+  expected_end_at TEXT,
+  planned_qty REAL NOT NULL DEFAULT 0,
+  planned_minutes REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS data_import_log (

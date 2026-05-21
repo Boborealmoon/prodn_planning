@@ -10,8 +10,18 @@ pages_bp = Blueprint("pages", __name__)
 
 @pages_bp.get("/")
 @pages_bp.get("/planner")
+@pages_bp.get("/planner-baseline")
+def planner_baseline_page():
+    return render_template("planner_baseline.html")
+
+
 @pages_bp.get("/trial")
-def planner_page():
+def trial_page():
+    return render_template("planner.html")
+
+
+@pages_bp.get("/actual-production")
+def actual_production_page():
     return render_template("planner.html")
 
 

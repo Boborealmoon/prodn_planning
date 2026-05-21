@@ -133,7 +133,7 @@ def trial_find_or_create_flow(con, part_id, bom_code):
         return int(flow["bom_id"])
     existing_count = int(one(con.execute("SELECT COUNT(*) AS cnt FROM bom_variation WHERE part_id = ?", (int(part_id),)))["cnt"] or 0)
     cur = con.execute(
-        "INSERT INTO bom_variation (part_id, bom_code, flow_name, is_default) VALUES (?, ?, ?, ?)",
+        "INSERT INTO bom_variation (part_id, bom_code, bom_desc, is_default) VALUES (?, ?, ?, ?)",
         (int(part_id), bom_code, "", 1 if existing_count <= 0 else 0),
     )
     return int(cur.lastrowid)

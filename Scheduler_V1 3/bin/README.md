@@ -55,6 +55,24 @@ Double-click **RESET_DEMO_DB.bat** and type YES when prompted.
 
 ---
 
+## Planner Modes
+
+- **Planner** opens the planning baseline at `/planner`
+- **Schedule** opens the live board at `/trial`
+- Planner Baseline uses planning efficiency and Monday-Friday capacity only
+- Live Schedule keeps the existing actual-entry workflow
+
+Useful checks:
+
+```bash
+python3 scripts/smoke_planning_scheduler.py
+python3 scripts/smoke_planner_api.py
+python3 scripts/smoke_scheduler.py
+python3 scripts/smoke_scheduler_semantics.py
+```
+
+---
+
 ## How to Use — Page by Page
 
 ### 📋 Process Sheets (Main Page)

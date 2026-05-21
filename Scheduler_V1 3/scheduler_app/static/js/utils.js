@@ -104,6 +104,15 @@ function minToHHMM(m) {
   return `${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;
 }
 
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Planner status badge
 function plannerStatusBadge(s) {
   const map = {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from flask import Flask
@@ -30,6 +31,7 @@ def create_app():
     app.register_blueprint(trial_summary_bp)
     app.register_blueprint(trial_bp)
     ensure_db()
-    with db() as con:
-        recalculate_all(con)
+    if os.environ.get("SCHEDULER_RECALCULATE_ON_STARTUP") == "1":
+        with db() as con:
+            recalculate_all(con)
     return app

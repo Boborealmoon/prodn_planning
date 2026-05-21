@@ -5,6 +5,8 @@ from datetime import date, datetime, timedelta
 from .actuals import actual_totals_for_block
 from .db import dt_now_text, one, rows
 
+ACTIVE_ALERT_STATUSES = ("ACTIVE", "OPEN", "ACKNOWLEDGED")
+
 
 def _text(value):
     return "" if value is None else str(value)
@@ -428,6 +430,10 @@ def upsert_schedule_alert(
     new_value="",
     planned_at=None,
     predicted_at=None,
+    expected_start_at=None,
+    actual_start_at=None,
+    drift_hours=None,
+    output_efficiency=None,
     delay_minutes=0,
     status="OPEN",
 ):
@@ -439,7 +445,7 @@ def upsert_schedule_alert(
             FROM schedule_alert
             WHERE block_id IS ?
               AND alert_type = ?
-              AND status IN ('OPEN', 'ACKNOWLEDGED')
+              AND status IN ('ACTIVE', 'OPEN', 'ACKNOWLEDGED')
             ORDER BY created_at DESC, alert_id DESC
             LIMIT 1
             """,
@@ -461,6 +467,12 @@ def upsert_schedule_alert(
         predicted_at,
         float(delay_minutes or 0),
         status,
+        None,
+        actual_start_at,
+        expected_start_at,
+        drift_hours,
+        output_efficiency,
+        None,
     )
     if existing:
         con.execute(
@@ -478,7 +490,12 @@ def upsert_schedule_alert(
                 predicted_at = ?,
                 delay_minutes = ?,
                 status = ?,
-                resolved_at = CASE WHEN ? = 'RESOLVED' THEN CURRENT_TIMESTAMP ELSE resolved_at END,
+                resolved_at = CASE WHEN ? = 'RESOLVED' THEN COALESCE(resolved_at, CURRENT_TIMESTAMP) ELSE resolved_at END,
+                actual_start_at = ?,
+                expected_start_at = ?,
+                drift_hours = ?,
+                output_efficiency = ?,
+                dismissed_at = CASE WHEN ? = 'DISMISSED' THEN COALESCE(dismissed_at, CURRENT_TIMESTAMP) ELSE dismissed_at END,
                 updated_at = CURRENT_TIMESTAMP
             WHERE alert_id = ?
             """,
@@ -496,6 +513,11 @@ def upsert_schedule_alert(
                 float(delay_minutes or 0),
                 status,
                 status,
+                actual_start_at,
+                expected_start_at,
+                drift_hours,
+                output_efficiency,
+                status,
                 int(existing["alert_id"]),
             ),
         )
@@ -505,8 +527,8 @@ def upsert_schedule_alert(
         INSERT INTO schedule_alert (
           schedule_run_id, block_id, operation_id, ps_id, machine_id, alert_type, severity,
           message, old_value, new_value, planned_at, predicted_at, delay_minutes, status,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          resolved_at, actual_start_at, expected_start_at, drift_hours, output_efficiency, dismissed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         params,
     )
@@ -523,4 +545,45 @@ def resolve_schedule_alert(con, alert_id):
         WHERE alert_id = ?
         """,
         (int(alert_id),),
+    )
+
+
+def dismiss_schedule_alert(con, alert_id):
+    con.execute(
+        """
+        UPDATE schedule_alert
+        SET status = 'DISMISSED',
+            dismissed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE alert_id = ?
+        """,
+        (int(alert_id),),
+    )
+
+
+def active_schedule_alert_rows(con, block_ids=None):
+    clauses = [f"status IN ({', '.join('?' for _ in ACTIVE_ALERT_STATUSES)})"]
+    params = list(ACTIVE_ALERT_STATUSES)
+    if block_ids:
+        ids = [int(block_id or 0) for block_id in block_ids if int(block_id or 0) > 0]
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        clauses.append(f"block_id IN ({placeholders})")
+        params.extend(ids)
+    where_clause = " AND ".join(clauses)
+    return rows(
+        con.execute(
+            f"""
+            SELECT alert_id, schedule_run_id, block_id, operation_id, ps_id, machine_id,
+                   alert_type, severity, message, old_value, new_value,
+                   planned_at, predicted_at, expected_start_at, actual_start_at,
+                   drift_hours, output_efficiency, delay_minutes, status,
+                   created_at, updated_at, resolved_at, dismissed_at
+            FROM schedule_alert
+            WHERE {where_clause}
+            ORDER BY created_at DESC, alert_id DESC
+            """,
+            params,
+        )
     )
