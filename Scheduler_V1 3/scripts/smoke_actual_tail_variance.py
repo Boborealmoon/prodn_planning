@@ -264,20 +264,26 @@ def main():
         data1 = save1.get_json() or {}
         if int(data1.get("saved_count") or 0) != 1:
             return fail("First save did not report saved_count=1")
-        change1 = (data1.get("tail_adjustments") or [{}])[0]
-        expected_delta1 = 1.0 - first_target
-        if abs(float(change1.get("old_variance") or 0) - 0.0) > 1e-9:
-            return fail("First save old_variance should be 0")
-        if abs(float(change1.get("new_variance") or 0) - expected_delta1) > 1e-9:
-            return fail("First save new_variance is incorrect")
-        if abs(float(change1.get("variance_delta") or 0) - expected_delta1) > 1e-9:
-            return fail("First save variance_delta is incorrect")
+        recon1 = data1.get("reconciliation") or {}
+        if abs(float(recon1.get("scheduled_qty") or 0) - original_total) > 1e-9:
+            return fail("First save reconciliation scheduled_qty is incorrect")
+        if abs(float(recon1.get("active_actual_good_qty") or 0) - 1.0) > 1e-9:
+            return fail("First save reconciliation active_actual_good_qty is incorrect")
+        if abs(float(recon1.get("future_required_qty") or 0) - 149.0) > 1e-9:
+            return fail("First save reconciliation future_required_qty is incorrect")
+        if abs(float(recon1.get("current_future_segment_qty_before") or 0) - 100.0) > 1e-9:
+            return fail("First save reconciliation current_future_segment_qty_before is incorrect")
+        if abs(float(recon1.get("delta") or 0) - 49.0) > 1e-9:
+            return fail("First save reconciliation delta is incorrect")
         planner_after1 = _get_json(client, "/api/trial/schedule")
         block_after1 = _find_block(planner_after1, fixture["block_id"])
+        actual_rows1 = [row for row in (block_after1.get("actual_daily_rows") or []) if str(row.get("report_date") or "") == report_date and row.get("is_existing_actual")]
+        if not actual_rows1 or abs(float(actual_rows1[0].get("output_qty") or 0) - 1.0) > 1e-9:
+            return fail("First save actual row was not persisted with output_qty=1")
         future_after1 = _future_total(block_after1, report_date)
-        if abs((future_after1 + 1.0) - original_total) > 1e-9:
-            return fail("First save did not preserve total planned quantity")
-        pass_msg("First actual save shaves/adds the tail by exact variance")
+        if abs(future_after1 - 149.0) > 1e-9:
+            return fail("First save did not reconcile future total to 149")
+        pass_msg("First actual save reconciles the tail deterministically")
 
         save2 = client.post(
             f"/api/trial/blocks/{fixture['block_id']}/actual",
@@ -296,22 +302,23 @@ def main():
         if save2.status_code != 200:
             return fail(f"Second save returned {save2.status_code}: {save2.get_data(as_text=True)}")
         data2 = save2.get_json() or {}
-        change2 = (data2.get("tail_adjustments") or [{}])[0]
-        if abs(float(change2.get("old_variance") or 0) - expected_delta1) > 1e-9:
-            return fail("Second save old_variance is incorrect")
-        expected_new_variance2 = 2.0 - first_target
-        if abs(float(change2.get("new_variance") or 0) - expected_new_variance2) > 1e-9:
-            return fail("Second save new_variance is incorrect")
-        if abs(float(change2.get("variance_delta") or 0) - 1.0) > 1e-9:
-            return fail("Second save should change variance by exactly +1")
+        recon2 = data2.get("reconciliation") or {}
+        if abs(float(recon2.get("active_actual_good_qty") or 0) - 2.0) > 1e-9:
+            return fail("Second save reconciliation active_actual_good_qty is incorrect")
+        if abs(float(recon2.get("future_required_qty") or 0) - 148.0) > 1e-9:
+            return fail("Second save reconciliation future_required_qty is incorrect")
+        if abs(float(recon2.get("current_future_segment_qty_before") or 0) - 149.0) > 1e-9:
+            return fail("Second save reconciliation current_future_segment_qty_before is incorrect")
+        if abs(float(recon2.get("delta") or 0) - (-1.0)) > 1e-9:
+            return fail("Second save reconciliation delta is incorrect")
         planner_after2 = _get_json(client, "/api/trial/schedule")
         block_after2 = _find_block(planner_after2, fixture["block_id"])
         future_after2 = _future_total(block_after2, report_date)
-        if abs((future_after2 + 2.0) - original_total) > 1e-9:
-            return fail("Second save did not preserve total planned quantity")
+        if abs(future_after2 - 148.0) > 1e-9:
+            return fail("Second save did not reconcile future total to 148")
         if abs(future_after1 - future_after2 - 1.0) > 1e-9:
             return fail("Second save did not reduce the tail by exactly one unit")
-        pass_msg("Correction from 1 to 2 changes tail by exactly one unit")
+        pass_msg("Correction from 1 to 2 reconciles the future tail by exactly one unit")
 
         save3 = client.post(
             f"/api/trial/blocks/{fixture['block_id']}/actual",
@@ -330,10 +337,9 @@ def main():
         if save3.status_code != 200:
             return fail(f"Repeat save returned {save3.status_code}: {save3.get_data(as_text=True)}")
         data3 = save3.get_json() or {}
-        if data3.get("tail_adjustments"):
-            delta = float((data3.get("tail_adjustments") or [{}])[0].get("variance_delta") or 0)
-            if abs(delta) > 1e-9:
-                return fail("Repeat save should not change variance")
+        recon3 = data3.get("reconciliation") or {}
+        if abs(float(recon3.get("delta") or 0)) > 1e-9:
+            return fail("Repeat save should not change reconciliation delta")
         planner_after3 = _get_json(client, "/api/trial/schedule")
         block_after3 = _find_block(planner_after3, fixture["block_id"])
         future_after3 = _future_total(block_after3, report_date)
@@ -348,16 +354,14 @@ def main():
         if delete_res.status_code != 200:
             return fail(f"Delete actual returned {delete_res.status_code}: {delete_res.get_data(as_text=True)}")
         delete_data = delete_res.get_json() or {}
-        change_del = (delete_data.get("tail_adjustments") or [{}])[0]
-        if abs(float(change_del.get("old_variance") or 0) - expected_new_variance2) > 1e-9:
-            return fail("Delete old_variance is incorrect")
-        if abs(float(change_del.get("new_variance") or 0) - 0.0) > 1e-9:
-            return fail("Delete new_variance should be 0")
+        recon_del = delete_data.get("reconciliation") or {}
+        if abs(float(recon_del.get("future_required_qty") or 0) - original_total) > 1e-9:
+            return fail("Delete reconciliation future_required_qty is incorrect")
         planner_after_delete = _get_json(client, "/api/trial/schedule")
         block_after_delete = _find_block(planner_after_delete, fixture["block_id"])
         future_after_delete = _future_total(block_after_delete, report_date)
-        if abs(future_after_delete - future_before) > 1e-9:
-            return fail("Delete did not restore the original future tail")
+        if abs(future_after_delete - original_total) > 1e-9:
+            return fail("Delete did not restore the original total scheduled quantity")
         if _active_actual_exists(client, fixture["block_id"], report_date):
             return fail("Deleted actual row is still active")
         pass_msg("Delete reverses the tail by the exact saved variance")

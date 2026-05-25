@@ -15,6 +15,7 @@ from ..blocks import (
     apply_actual_variance_delta_to_block_tail,
     actual_daily_rows_for_block_row,
     apply_removed_target_date_to_block_tail,
+    reconcile_block_schedule_after_actuals,
     recalculate_all,
     recalculate_machine,
     refresh_planner_alerts,
@@ -1378,6 +1379,32 @@ def api_trial_actual(block_id):
         delete_dates = [compact_text(v) for v in (data.get("delete_actual_dates") or []) if compact_text(v)]
         removed_target_dates = [compact_text(v) for v in (data.get("removed_target_dates") or []) if compact_text(v)]
         daily_actuals = data.get("daily_actuals") or []
+        rows_before = [
+            dict(row)
+            for row in rows(
+                con.execute(
+                    """
+                    SELECT actual_id, segment_id, block_id, report_date,
+                           output_qty, reject_qty, target_qty_at_report,
+                           remarks, status, reported_at
+                    FROM production_actual
+                    WHERE block_id = ?
+                    ORDER BY report_date, actual_id
+                    """,
+                    (int(block_id),),
+                )
+            )
+        ]
+        debug_actual_save = {
+            "incoming_daily_actuals": daily_actuals,
+            "incoming_delete_dates": delete_dates,
+            "incoming_removed_target_dates": removed_target_dates,
+            "rows_before": rows_before,
+            "rows_after": [],
+            "inserted_actual_ids": [],
+            "voided_actual_ids": [],
+            "skipped_rows": [],
+        }
         if not delete_dates and not removed_target_dates and not daily_actuals:
             return jsonify({"error": "No actual rows submitted."}), 400
         saved_count = 0
@@ -1385,65 +1412,13 @@ def api_trial_actual(block_id):
         removed_target_count = 0
         removed_target_qty = 0.0
         skipped_count = 0
-        adjusted_tail_qty = 0.0
-        schedule_adjusted = False
-        tail_changes = []
+        inserted_actual_ids = []
+        voided_actual_ids = []
+        skipped_rows = []
+        post_save_errors = []
         removed_target_date_set = set(removed_target_dates)
 
         for report_date in delete_dates:
-            existing_rows = rows(
-                con.execute(
-                    """
-                    SELECT *
-                    FROM production_actual
-                    WHERE block_id = ?
-                      AND report_date = ?
-                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
-                    """,
-                    (int(block_id), report_date),
-                )
-            )
-            for row in existing_rows:
-                _void_actual(con, int(row["actual_id"]))
-                deleted_count += 1
-                if report_date in removed_target_date_set:
-                    continue
-                old_output = parse_nullable_number(row.get("output_qty")) if row.get("output_qty") is not None else None
-                old_reject = parse_nullable_number(row.get("reject_qty")) if row.get("reject_qty") is not None else None
-                old_good = _actual_good_qty(old_output, old_reject)
-                if old_good is None:
-                    old_good = 0.0
-                old_target = parse_nullable_number(row.get("target_qty_at_report"))
-                if old_target is None:
-                    old_target = _planned_target_qty_for_block_date(con, block_id, report_date)
-                old_variance = _actual_variance(old_good, old_target)
-                variance_delta = 0.0 - float(old_variance)
-                if abs(variance_delta) > 1e-9:
-                    tail_changes.append(
-                        {
-                            "report_date": report_date,
-                            "change_type": "actual_delete",
-                            "old_variance": float(old_variance),
-                            "new_variance": 0.0,
-                            "variance_delta": float(variance_delta),
-                        }
-                    )
-
-        for report_date in removed_target_dates:
-            existing_removed = one(
-                con.execute(
-                    """
-                    SELECT *
-                    FROM block_removed_actual_date
-                    WHERE block_id = ?
-                      AND report_date = ?
-                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
-                    ORDER BY removed_date_id DESC
-                    LIMIT 1
-                    """,
-                    (int(block_id), report_date),
-                )
-            )
             existing_rows = rows(
                 con.execute(
                     """
@@ -1458,8 +1433,42 @@ def api_trial_actual(block_id):
                 )
             )
             for row in existing_rows:
+                voided_actual_ids.append(int(row["actual_id"]))
                 _void_actual(con, int(row["actual_id"]))
                 deleted_count += 1
+
+        for report_date in removed_target_dates:
+            existing_rows = rows(
+                con.execute(
+                    """
+                    SELECT *
+                    FROM production_actual
+                    WHERE block_id = ?
+                      AND report_date = ?
+                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    ORDER BY actual_id DESC
+                    """,
+                    (int(block_id), report_date),
+                )
+            )
+            for row in existing_rows:
+                voided_actual_ids.append(int(row["actual_id"]))
+                _void_actual(con, int(row["actual_id"]))
+                deleted_count += 1
+            existing_removed = one(
+                con.execute(
+                    """
+                    SELECT *
+                    FROM block_removed_actual_date
+                    WHERE block_id = ?
+                      AND report_date = ?
+                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    ORDER BY removed_date_id DESC
+                    LIMIT 1
+                    """,
+                    (int(block_id), report_date),
+                )
+            )
             if existing_removed:
                 continue
 
@@ -1479,59 +1488,58 @@ def api_trial_actual(block_id):
                 """,
                 (int(block_id), report_date, float(target_qty)),
             )
-            removed_result = apply_removed_target_date_to_block_tail(con, block_id, report_date, target_qty)
             removed_target_count += 1
             removed_target_qty += float(target_qty)
-            schedule_adjusted = schedule_adjusted or bool(removed_result.get("changed"))
-            tail_changes.append(
-                {
-                    "report_date": report_date,
-                    "change_type": "removed_target",
-                    "removed_target_qty": float(target_qty),
-                    "variance_delta": float(target_qty),
-                }
-            )
 
         for row in daily_actuals:
             report_date = compact_text(row.get("report_date"))
             if not report_date:
                 skipped_count += 1
+                skipped_rows.append({"report_date": "", "reason": "missing report_date"})
                 continue
+
             raw_output = row.get("output_qty") if "output_qty" in row else row.get("actual_good_qty")
             raw_reject = row.get("reject_qty") if "reject_qty" in row else row.get("actual_reject_qty")
             raw_remarks = compact_text(row.get("remarks"))
             raw_target = row.get("target_qty")
-            output_provided = "output_qty" in row and compact_text(raw_output) != ""
-            reject_provided = "reject_qty" in row and compact_text(raw_reject) != ""
+
+            output_text = "" if raw_output is None else str(raw_output).strip()
+            reject_text = "" if raw_reject is None else str(raw_reject).strip()
+            output_provided = "output_qty" in row and output_text != ""
+            reject_provided = "reject_qty" in row and reject_text != ""
             remarks_provided = raw_remarks != ""
             target_provided = "target_qty" in row and compact_text(raw_target) != ""
             if not output_provided and not reject_provided and not remarks_provided:
                 skipped_count += 1
+                skipped_rows.append({"report_date": report_date, "reason": "blank row"})
                 continue
+
             output_value = parse_nullable_number(raw_output) if output_provided else None
             reject_value = parse_nullable_number(raw_reject) if reject_provided else None
+            if output_provided and output_value is None:
+                skipped_count += 1
+                skipped_rows.append({"report_date": report_date, "reason": "invalid output_qty"})
+                continue
+            if reject_provided and reject_value is None:
+                skipped_count += 1
+                skipped_rows.append({"report_date": report_date, "reason": "invalid reject_qty"})
+                continue
+
             remarks_value = raw_remarks
             existing = _active_actual_for_block_date(con, block_id, report_date)
-            old_output = parse_nullable_number(existing["output_qty"]) if existing and existing.get("output_qty") is not None else None
-            old_reject = parse_nullable_number(existing["reject_qty"]) if existing and existing.get("reject_qty") is not None else None
-            old_good = _actual_good_qty(old_output, old_reject)
             if target_provided:
                 target_qty = parse_nullable_number(raw_target)
             else:
                 existing_target = parse_nullable_number(existing["target_qty_at_report"]) if existing and existing.get("target_qty_at_report") is not None else None
-                if existing_target is not None:
-                    target_qty = existing_target
-                else:
-                    target_qty = _planned_target_qty_for_block_date(con, block_id, report_date)
+                target_qty = existing_target if existing_target is not None else _planned_target_qty_for_block_date(con, block_id, report_date)
             if target_qty is None:
                 target_qty = 0.0
-            old_target = parse_nullable_number(existing["target_qty_at_report"]) if existing and existing.get("target_qty_at_report") is not None else None
-            if old_target is None:
-                old_target = target_qty if existing else _planned_target_qty_for_block_date(con, block_id, report_date)
-            old_variance = _actual_variance(old_good, old_target)
+
             if existing:
+                voided_actual_ids.append(int(existing["actual_id"]))
                 _void_actual(con, existing["actual_id"])
-            _insert_actual(
+
+            inserted_actual_id = _insert_actual(
                 con,
                 segment_id=None,
                 block_id=int(block_id),
@@ -1546,52 +1554,88 @@ def api_trial_actual(block_id):
                 created_by=compact_text(row.get("created_by")),
             )
             saved_count += 1
-            new_good = _actual_good_qty(output_value, reject_value)
-            new_variance = _actual_variance(new_good, target_qty)
-            variance_delta = float(new_variance) - float(old_variance)
-            if abs(variance_delta) > 1e-9:
-                tail_changes.append(
-                    {
-                        "report_date": report_date,
-                        "change_type": "actual_save",
-                        "old_variance": float(old_variance),
-                        "new_variance": float(new_variance),
-                        "variance_delta": float(variance_delta),
-                    }
+            inserted_actual_ids.append(int(inserted_actual_id))
+            inserted_confirmed = one(
+                con.execute(
+                    """
+                    SELECT actual_id, status
+                    FROM production_actual
+                    WHERE actual_id = ?
+                    """,
+                    (int(inserted_actual_id),),
                 )
-        refresh_block_actual_status(con, block_id)
-        refresh_block_schedule_bounds(con, block_id)
-        recalculate_planning_all_baseline(con, reason="ACTUAL_DAILY_SAVE")
-        for change in tail_changes:
-            if change.get("change_type") == "removed_target":
-                adjusted_tail_qty += abs(float(change["variance_delta"]))
-                continue
-            tail_result = apply_actual_variance_delta_to_block_tail(
-                con,
-                block_id,
-                change["report_date"],
-                change["variance_delta"],
             )
-            adjusted_tail_qty += abs(float(change["variance_delta"]))
-            schedule_adjusted = schedule_adjusted or bool(tail_result.get("changed"))
-        refresh_block_schedule_bounds(con, block_id)
-        refresh_planner_alerts(con)
+            if not inserted_confirmed or compact_text(inserted_confirmed["status"] or "").upper() != "ACTIVE":
+                return jsonify({
+                    "ok": False,
+                    "error": "Inserted actual row was not persisted as ACTIVE.",
+                    "debug_actual_save": debug_actual_save,
+                }), 500
+
+        reconciliation = reconcile_block_schedule_after_actuals(con, block_id)
+
+        try:
+            refresh_block_actual_status(con, block_id)
+            refresh_block_schedule_bounds(con, block_id)
+            recalculate_planning_all_baseline(con, reason="ACTUAL_DAILY_SAVE")
+            refresh_planner_alerts(con)
+        except Exception as exc:
+            post_save_errors.append(str(exc))
+
         updated_block = trial_block_row(con, block_id)
         block_payload = trial_block_payload(updated_block, con)
-        actuals = rows(
-            con.execute(
-                """
-                SELECT actual_id, segment_id, block_id, report_date,
-                       output_qty, reject_qty, target_qty_at_report,
-                       remarks, reported_at
-                FROM production_actual
-                WHERE block_id = ?
-                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
-                ORDER BY report_date, actual_id
-                """,
-                (int(block_id),),
+        rows_after = [
+            dict(row)
+            for row in rows(
+                con.execute(
+                    """
+                    SELECT actual_id, segment_id, block_id, report_date,
+                           output_qty, reject_qty, target_qty_at_report,
+                           remarks, status, reported_at
+                    FROM production_actual
+                    WHERE block_id = ?
+                    ORDER BY report_date, actual_id
+                    """,
+                    (int(block_id),),
+                )
             )
-        )
+        ]
+        actuals_active = [
+            dict(row)
+            for row in rows(
+                con.execute(
+                    """
+                    SELECT actual_id, segment_id, block_id, report_date,
+                           output_qty, reject_qty, target_qty_at_report,
+                           remarks, status, reported_at
+                    FROM production_actual
+                    WHERE block_id = ?
+                      AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                    ORDER BY report_date, actual_id
+                    """,
+                    (int(block_id),),
+                )
+            )
+        ]
+        debug_actual_save["rows_after"] = rows_after
+        debug_actual_save["inserted_actual_ids"] = inserted_actual_ids
+        debug_actual_save["voided_actual_ids"] = voided_actual_ids
+        debug_actual_save["skipped_rows"] = skipped_rows
+        debug_actual_save["errors"] = post_save_errors
+        missing_inserted = [
+            actual_id
+            for actual_id in inserted_actual_ids
+            if not any(int(row["actual_id"]) == int(actual_id) and compact_text(row["status"] or "").upper() == "ACTIVE" for row in rows_after)
+        ]
+        if missing_inserted:
+            return jsonify({
+                "ok": False,
+                "error": "Inserted actual row disappeared before response.",
+                "missing_inserted_actual_ids": missing_inserted,
+                "debug_actual_save": debug_actual_save,
+            }), 500
+
+        actual_daily_rows = actual_daily_rows_for_block_row(con, updated_block)
         return jsonify({
             "ok": True,
             "saved_count": saved_count,
@@ -1600,13 +1644,14 @@ def api_trial_actual(block_id):
             "removed_target_qty": removed_target_qty,
             "skipped_count": skipped_count,
             "changed_count": saved_count + deleted_count + removed_target_count,
-            "adjusted_tail_qty": adjusted_tail_qty,
-            "schedule_adjusted": bool(schedule_adjusted or adjusted_tail_qty > 0),
-            "tail_adjustments": tail_changes,
             "block": block_payload,
-            "actual_daily_rows": block_payload.get("actual_daily_rows") or [],
-            "actuals": [dict(r) for r in actuals],
+            "reconciliation": reconciliation,
+            "actual_daily_rows": actual_daily_rows,
+            "actuals_active": actuals_active,
+            "actuals_all": rows_after,
+            "actuals": actuals_active,
             "removed_actual_dates": removed_actual_dates_for_block_row(con, updated_block),
+            "debug_actual_save": debug_actual_save,
         })
 
 @trial_bp.post("/api/trial/recalc")

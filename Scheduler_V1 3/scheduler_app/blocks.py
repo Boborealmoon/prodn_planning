@@ -181,6 +181,49 @@ def removed_actual_dates_for_block_row(con, block_row):
     ]
 
 
+def removed_dates_for_block(con, block_id):
+    if not con:
+        return set()
+    return {
+        compact_text(row["report_date"] or "")
+        for row in rows(
+            con.execute(
+                """
+                SELECT report_date
+                FROM block_removed_actual_date
+                WHERE block_id = ?
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                ORDER BY report_date
+                """,
+                (int(block_id),),
+            )
+        )
+        if compact_text(row["report_date"] or "")
+    }
+
+
+def block_tail_boundary(con, block_id):
+    return one(
+        con.execute(
+            """
+            SELECT *
+            FROM run_block_segment
+            WHERE block_id = ?
+              AND COALESCE(segment_type, '') = 'production'
+              AND segment_id NOT IN (
+                SELECT segment_id
+                FROM production_actual
+                WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+              )
+            ORDER BY segment_date DESC, end_datetime DESC, segment_id DESC
+            LIMIT 1
+            """,
+            (int(block_id),),
+        )
+    )
+
+
 def _actual_good_qty(output_qty, reject_qty):
     if output_qty is None and reject_qty is None:
         return None
@@ -204,7 +247,13 @@ def apply_actual_variance_delta_to_block_tail(con, block_id, actual_date_text, v
 
     actual_date = parse_dt_text(actual_date_text).date() if actual_date_text else date.today()
     if variance_delta > 0:
-        result = apply_output_delta_to_block_tail(con, block_id, actual_date_text, variance_delta)
+        result = apply_output_delta_to_block_tail(
+            con,
+            block_id,
+            actual_date_text,
+            variance_delta,
+            excluded_dates=removed_dates_for_block(con, block_id),
+        )
         refresh_block_schedule_bounds(con, block_id)
         return {
             "changed": bool(result.get("changed")),
@@ -213,7 +262,7 @@ def apply_actual_variance_delta_to_block_tail(con, block_id, actual_date_text, v
             "direction": "shave",
         }
 
-    changed = add_shortfall_to_tail_with_capacity(con, block_id, actual_date, abs(variance_delta))
+    changed = add_qty_to_block_tail(con, block_id, abs(variance_delta), excluded_dates=removed_dates_for_block(con, block_id))
     refresh_block_schedule_bounds(con, block_id)
     return {
         "changed": bool(changed),
@@ -267,8 +316,8 @@ def apply_removed_target_date_to_block_tail(con, block_id, report_date_text, tar
         (int(block_id), report_date),
     )
 
-    report_dt = parse_dt_text(report_date) if report_date else None
-    changed = add_shortfall_to_tail_with_capacity(con, block_id, report_dt.date() if report_dt else date.today(), removed_qty)
+    changed = add_qty_to_block_tail(con, block_id, removed_qty, excluded_dates=removed_dates_for_block(con, block_id))
+    refresh_block_schedule_bounds(con, block_id)
     return {"changed": bool(changed), "removed_qty": float(removed_qty)}
 
 
@@ -1003,7 +1052,7 @@ def _apply_planned_start_constraints(con, block, candidate_start, planned_start,
     return candidate_start
 
 
-def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add, schedule_run_id=None):
+def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add, schedule_run_id=None, excluded_dates=None):
     block = trial_block_row(con, block_id)
     if not block:
         return False
@@ -1017,12 +1066,16 @@ def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add, 
     if remaining_qty <= 0:
         return False
 
+    excluded_dates = {compact_text(v) for v in (excluded_dates or []) if compact_text(v)}
     work_date = after_date + timedelta(days=1)
     changed = False
     safety = 0
 
     while remaining_qty > 0 and safety < 370:
         safety += 1
+        if date_text(work_date) in excluded_dates:
+            work_date += timedelta(days=1)
+            continue
         intervals = machine_work_intervals_for_day(con, machine_id, work_date)
         if not intervals:
             work_date += timedelta(days=1)
@@ -1064,7 +1117,7 @@ def add_future_segments_after_date(con, block_id, after_date: date, qty_to_add, 
     return changed
 
 
-def add_shortfall_to_tail_with_capacity(con, block_id, actual_date, qty_to_add):
+def add_qty_to_block_tail(con, block_id, qty_to_add, excluded_dates=None):
     block = trial_block_row(con, block_id)
     if not block:
         return False
@@ -1078,15 +1131,75 @@ def add_shortfall_to_tail_with_capacity(con, block_id, actual_date, qty_to_add):
     if remaining_to_add <= 0:
         return False
 
+    excluded_dates = {compact_text(v) for v in (excluded_dates or []) if compact_text(v)}
     changed = False
-    tail = one(
+    tail = block_tail_boundary(con, block_id)
+
+    if tail:
+        tail_date_text = compact_text(tail["segment_date"])
+        tail_date = parse_dt_text(tail_date_text).date() if tail_date_text else date.today()
+        if tail_date_text not in excluded_dates:
+            cap = capacity_minutes_for_machine_day(con, machine_id, tail_date)
+            capacity_minutes = int(cap["capacity_minutes"] or 0)
+            max_qty_for_tail_day = math.floor(capacity_minutes / cycle_time) if cycle_time > 0 else 0
+            current_qty = float(tail["qty_done"] or 0)
+            available_qty_on_tail = max(0.0, max_qty_for_tail_day - current_qty)
+            add_to_tail = min(remaining_to_add, available_qty_on_tail)
+
+            if add_to_tail > 0:
+                new_qty = current_qty + add_to_tail
+                new_minutes = new_qty * cycle_time
+                start_dt = parse_dt_text(tail["start_datetime"])
+                end_dt = start_dt + timedelta(minutes=new_minutes) if start_dt else parse_dt_text(tail["end_datetime"])
+                con.execute(
+                    """
+                    UPDATE run_block_segment
+                    SET qty_done = ?, minutes_used = ?, end_datetime = ?
+                    WHERE segment_id = ?
+                    """,
+                    (
+                        new_qty,
+                        new_minutes,
+                        end_dt.strftime("%Y-%m-%d %H:%M:%S") if end_dt else tail["end_datetime"],
+                        int(tail["segment_id"]),
+                    ),
+                )
+                remaining_to_add -= add_to_tail
+                changed = True
+        if remaining_to_add > 0:
+            changed = add_future_segments_after_date(con, block_id, tail_date, remaining_to_add, excluded_dates=excluded_dates) or changed
+    else:
+        start_date = date.today()
+        changed = add_future_segments_after_date(con, block_id, start_date, remaining_to_add, excluded_dates=excluded_dates)
+
+    return changed
+
+
+def add_shortfall_to_tail_with_capacity(con, block_id, actual_date, qty_to_add):
+    return add_qty_to_block_tail(con, block_id, qty_to_add, excluded_dates=removed_dates_for_block(con, block_id))
+
+
+def shave_qty_from_block_tail(con, block_id, qty_to_shave, excluded_dates=None):
+    block = trial_block_row(con, block_id)
+    if not block:
+        return False
+
+    cycle_time = max(0.0, float(block["cycle_minutes_per_qty"] or 0))
+    if cycle_time <= 0:
+        return False
+
+    remaining_to_shave = float(qty_to_shave or 0)
+    if remaining_to_shave <= 0:
+        return False
+
+    excluded_dates = {compact_text(v) for v in (excluded_dates or []) if compact_text(v)}
+    future_segments = rows(
         con.execute(
             """
             SELECT *
             FROM run_block_segment
             WHERE block_id = ?
-              AND segment_type = 'production'
-              AND segment_date > ?
+              AND COALESCE(segment_type, '') = 'production'
               AND segment_id NOT IN (
                 SELECT segment_id
                 FROM production_actual
@@ -1094,27 +1207,30 @@ def add_shortfall_to_tail_with_capacity(con, block_id, actual_date, qty_to_add):
                   AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
               )
             ORDER BY segment_date DESC, end_datetime DESC, segment_id DESC
-            LIMIT 1
             """,
-            (int(block_id), date_text(actual_date)),
+            (int(block_id),),
         )
     )
 
-    if tail:
-        tail_date_text = compact_text(tail["segment_date"])
-        tail_date = parse_dt_text(tail_date_text).date() if tail_date_text else actual_date
-        cap = capacity_minutes_for_machine_day(con, machine_id, tail_date)
-        capacity_minutes = int(cap["capacity_minutes"] or 0)
-        max_qty_for_tail_day = math.floor(capacity_minutes / cycle_time) if cycle_time > 0 else 0
-        current_qty = float(tail["qty_done"] or 0)
-        available_qty_on_tail = max(0.0, max_qty_for_tail_day - current_qty)
-        add_to_tail = min(remaining_to_add, available_qty_on_tail)
+    changed = False
+    for seg in future_segments:
+        if remaining_to_shave <= 0:
+            break
 
-        if add_to_tail > 0:
-            new_qty = current_qty + add_to_tail
+        seg_date_text = compact_text(seg["segment_date"] or "")
+        if seg_date_text in excluded_dates:
+            continue
+
+        seg_qty = float(seg["qty_done"] or 0)
+        shave = min(seg_qty, remaining_to_shave)
+        new_qty = seg_qty - shave
+
+        if new_qty <= 0:
+            con.execute("DELETE FROM run_block_segment WHERE segment_id = ?", (int(seg["segment_id"]),))
+        else:
             new_minutes = new_qty * cycle_time
-            start_dt = parse_dt_text(tail["start_datetime"])
-            end_dt = start_dt + timedelta(minutes=new_minutes) if start_dt else parse_dt_text(tail["end_datetime"])
+            start_dt = parse_dt_text(seg["start_datetime"])
+            end_dt = start_dt + timedelta(minutes=new_minutes) if start_dt else parse_dt_text(seg["end_datetime"])
             con.execute(
                 """
                 UPDATE run_block_segment
@@ -1124,19 +1240,176 @@ def add_shortfall_to_tail_with_capacity(con, block_id, actual_date, qty_to_add):
                 (
                     new_qty,
                     new_minutes,
-                    end_dt.strftime("%Y-%m-%d %H:%M:%S") if end_dt else tail["end_datetime"],
-                    int(tail["segment_id"]),
+                    end_dt.strftime("%Y-%m-%d %H:%M:%S") if end_dt else seg["end_datetime"],
+                    int(seg["segment_id"]),
                 ),
             )
-            remaining_to_add -= add_to_tail
-            changed = True
 
-        if remaining_to_add > 0:
-            changed = add_future_segments_after_date(con, block_id, tail_date, remaining_to_add) or changed
-    else:
-        changed = add_future_segments_after_date(con, block_id, actual_date, remaining_to_add)
+        remaining_to_shave -= shave
+        changed = True
 
     return changed
+
+
+def reconcile_block_schedule_after_actuals(con, block_id):
+    block = trial_block_row(con, block_id)
+    if not block:
+        return {
+            "block_id": int(block_id),
+            "scheduled_qty": 0.0,
+            "active_actual_good_qty": 0.0,
+            "future_required_qty": 0.0,
+            "current_future_segment_qty_before": 0.0,
+            "delta": 0.0,
+            "excluded_dates": [],
+            "changed": False,
+        }
+
+    actual_dates = {
+        compact_text(row["report_date"] or "")
+        for row in rows(
+            con.execute(
+                """
+                SELECT DISTINCT report_date
+                FROM production_actual
+                WHERE block_id = ?
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                ORDER BY report_date
+                """,
+                (int(block_id),),
+            )
+        )
+        if compact_text(row["report_date"] or "")
+    }
+    removed_dates = removed_dates_for_block(con, block_id)
+    excluded_dates = {v for v in (*actual_dates, *removed_dates) if compact_text(v)}
+
+    placeholders = ",".join("?" for _ in excluded_dates) if excluded_dates else ""
+    delete_sql = """
+        DELETE FROM run_block_segment
+        WHERE block_id = ?
+          AND COALESCE(segment_type, '') = 'production'
+          AND segment_id NOT IN (
+            SELECT segment_id
+            FROM production_actual
+            WHERE segment_id IS NOT NULL
+              AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+          )
+    """
+    params = [int(block_id)]
+    if excluded_dates:
+        delete_sql += f" AND segment_date IN ({placeholders})"
+        params.extend(sorted(excluded_dates))
+    removed_segments = rows(
+        con.execute(
+            """
+            SELECT segment_id
+            FROM run_block_segment
+            WHERE block_id = ?
+              AND COALESCE(segment_type, '') = 'production'
+              AND segment_id NOT IN (
+                SELECT segment_id
+                FROM production_actual
+                WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+              )
+            """ + (f" AND segment_date IN ({placeholders})" if excluded_dates else ""),
+            params,
+        )
+    )
+    if removed_segments:
+        con.execute(delete_sql, params)
+
+    active_actual_good_qty = 0.0
+    for row in rows(
+        con.execute(
+            """
+            SELECT output_qty, reject_qty
+            FROM production_actual
+            WHERE block_id = ?
+              AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+            """,
+            (int(block_id),),
+        )
+    ):
+        good = _actual_good_qty(row["output_qty"], row["reject_qty"])
+        if good is not None:
+            active_actual_good_qty += float(good or 0)
+
+    scheduled_qty = max(0.0, float(block["scheduled_qty"] or 0))
+    future_required_qty = max(0.0, scheduled_qty - active_actual_good_qty)
+
+    current_future_segment_qty_before = 0.0
+    for row in rows(
+        con.execute(
+            """
+            SELECT qty_done, planned_qty
+            FROM run_block_segment
+            WHERE block_id = ?
+              AND COALESCE(segment_type, '') = 'production'
+              AND segment_id NOT IN (
+                SELECT segment_id
+                FROM production_actual
+                WHERE segment_id IS NOT NULL
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+              )
+            """,
+            (int(block_id),),
+        )
+    ):
+        current_future_segment_qty_before += float(row["qty_done"] or row["planned_qty"] or 0)
+
+    delta = float(future_required_qty) - float(current_future_segment_qty_before)
+    changed = bool(removed_segments)
+    if delta > 1e-9:
+        changed = add_qty_to_block_tail(con, block_id, delta, excluded_dates=excluded_dates)
+    elif delta < -1e-9:
+        changed = shave_qty_from_block_tail(con, block_id, abs(delta), excluded_dates=excluded_dates)
+
+    refresh_block_schedule_bounds(con, block_id)
+    return {
+        "block_id": int(block_id),
+        "scheduled_qty": float(scheduled_qty),
+        "active_actual_good_qty": float(active_actual_good_qty),
+        "future_required_qty": float(future_required_qty),
+        "current_future_segment_qty_before": float(current_future_segment_qty_before),
+        "delta": float(delta),
+        "excluded_dates": sorted(excluded_dates),
+        "changed": bool(changed),
+    }
+
+
+def enforce_removed_dates_for_block(con, block_id):
+    removed_dates = removed_dates_for_block(con, block_id)
+    if not removed_dates:
+        return False
+
+    removed_segments = rows(
+        con.execute(
+            """
+            SELECT *
+            FROM run_block_segment
+            WHERE block_id = ?
+              AND COALESCE(segment_type, '') = 'production'
+              AND segment_date IN ({})
+            ORDER BY segment_date DESC, end_datetime DESC, segment_id DESC
+            """.format(",".join("?" for _ in removed_dates)),
+            [int(block_id), *sorted(removed_dates)],
+        )
+    )
+    if not removed_segments:
+        refresh_block_schedule_bounds(con, block_id)
+        return False
+
+    removed_qty = sum(float(seg["qty_done"] or seg["planned_qty"] or 0) for seg in removed_segments)
+    for seg in removed_segments:
+        con.execute("DELETE FROM run_block_segment WHERE segment_id = ?", (int(seg["segment_id"]),))
+
+    changed = False
+    if removed_qty > 0:
+        changed = add_qty_to_block_tail(con, block_id, removed_qty, excluded_dates=removed_dates)
+    refresh_block_schedule_bounds(con, block_id)
+    return bool(changed or removed_qty > 0)
 
 
 def refresh_block_schedule_bounds(con, block_id):
@@ -1205,7 +1478,7 @@ def refresh_block_schedule_bounds(con, block_id):
     )
 
 
-def apply_output_delta_to_block_tail(con, block_id, actual_date_text, delta_qty):
+def apply_output_delta_to_block_tail(con, block_id, actual_date_text, delta_qty, excluded_dates=None):
     delta_qty = float(delta_qty or 0)
     if delta_qty == 0:
         return {"changed": False, "applied_qty": 0.0}
@@ -1227,6 +1500,7 @@ def apply_output_delta_to_block_tail(con, block_id, actual_date_text, delta_qty)
     if cycle_time <= 0:
         return {"changed": False, "applied_qty": 0.0}
 
+    excluded_dates = {compact_text(v) for v in (excluded_dates or []) if compact_text(v)}
     future_segments = rows(
         con.execute(
             """
@@ -1251,6 +1525,10 @@ def apply_output_delta_to_block_tail(con, block_id, actual_date_text, delta_qty)
     for seg in future_segments:
         if remaining_to_shave <= 0:
             break
+
+        seg_date_text = compact_text(seg["segment_date"] or "")
+        if seg_date_text in excluded_dates:
+            continue
 
         seg_qty = float(seg["qty_done"] or 0)
         shave = min(seg_qty, remaining_to_shave)
@@ -2187,6 +2465,35 @@ def recalculate_machine(con, machine_id, reason="PLANNER_CHANGE", schedule_run_i
         refreshed_end = parse_dt_text(refreshed_leader["calculated_end_datetime"]) if refreshed_leader else None
         if refreshed_end and refreshed_end > current_dt:
             current_dt = refreshed_end
+
+    for block in blocks:
+        block_id = int(block["block_id"])
+        has_active_actual = one(
+            con.execute(
+                """
+                SELECT 1 AS present
+                FROM production_actual
+                WHERE block_id = ?
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                LIMIT 1
+                """,
+                (block_id,),
+            )
+        )
+        has_removed_dates = one(
+            con.execute(
+                """
+                SELECT 1 AS present
+                FROM block_removed_actual_date
+                WHERE block_id = ?
+                  AND COALESCE(status, 'ACTIVE') = 'ACTIVE'
+                LIMIT 1
+                """,
+                (block_id,),
+            )
+        )
+        if has_active_actual or has_removed_dates:
+            reconcile_block_schedule_after_actuals(con, block_id)
 
     refresh_states_for_machine(con, int(machine_id), schedule_run_id=schedule_run_id)
     refresh_planner_alerts(con, blocks)
