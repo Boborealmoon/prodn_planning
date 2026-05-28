@@ -18,6 +18,7 @@ def trial_catalog_items(con, include_completed=False):
             FROM operation o
             JOIN run_block b ON b.operation_id = o.operation_id
             WHERE COALESCE(o.source_ps_id, '') <> ''
+              AND COALESCE(o.status, 'ACTIVE') = 'ACTIVE'
               AND COALESCE(b.active, 1) = 1
               AND COALESCE(b.block_type, 'ORIGINAL') <> 'REWORK'
             GROUP BY o.source_ps_id, COALESCE(o.pp_partial_no, ''), COALESCE(o.selected_bom_id, 0), o.source_op_no, o.source_op_seq_id
@@ -40,12 +41,20 @@ def trial_catalog_items(con, include_completed=False):
                    ps.completed AS completed, ps.completed_at AS completed_at, ps.completed_by AS completed_by,
                    sf.bom_code AS selected_bom_code,
                    p.part_no AS part_name, pfs.op_seq_id AS op_seq_id, pfs.seq_no, pfs.op_no, pfs.op_type, pfs.machine_category, pfs.preferred_machine,
+                   COALESCE(o.status, 'ACTIVE') AS op_status,
                    pfs.cycle_time, pfs.setup_time, pfs.is_last_op
             FROM process_sheet ps
             LEFT JOIN parts p ON p.part_id = ps.part_id
             LEFT JOIN bom_variation sf ON sf.bom_id = ps.selected_bom_id
             LEFT JOIN operation_seq pfs ON pfs.bom_id = ps.selected_bom_id
+            LEFT JOIN operation o
+              ON COALESCE(o.source_ps_id, '') = COALESCE(ps.source_ps_id, ps.ps_id, '')
+             AND COALESCE(o.pp_partial_no, '') = COALESCE(ps.pp_partial_no, '')
+             AND COALESCE(o.selected_bom_id, 0) = COALESCE(ps.selected_bom_id, 0)
+             AND COALESCE(o.source_op_seq_id, 0) = COALESCE(pfs.op_seq_id, 0)
+             AND COALESCE(o.source_op_no, '') = COALESCE(pfs.op_no, '')
             WHERE COALESCE(ps.selected_bom_id, 0) > 0
+              AND COALESCE(o.status, 'ACTIVE') = 'ACTIVE'
               AND (? = 1 OR (COALESCE(ps.completed, 0) = 0 AND COALESCE(ps.planner_status, '') <> 'COMPLETED' AND COALESCE(ps.status, '') <> 'COMPLETED'))
             ORDER BY ps.due_date, ps.ps_id, pfs.seq_no, pfs.op_seq_id
             """,
@@ -74,6 +83,8 @@ def trial_catalog_items(con, include_completed=False):
     for row in records:
         ps_id = compact_text(row["ps_id"])
         op_seq_id = int(row["op_seq_id"] or 0)
+        if compact_text(row.get("op_status") or "ACTIVE").upper() != "ACTIVE":
+            continue
         op_key = (
             ps_id,
             compact_text(row["pp_partial_no"] or ""),
@@ -120,7 +131,7 @@ def trial_catalog_items(con, include_completed=False):
             "setup_time": float(row["setup_time"] or 0),
             "is_last_op": int(row["is_last_op"] or 0),
             "job_no": ps_id,
-            "operation_name": f"{row['op_no'] or ''} {row['op_type'] or ''}".strip(),
+            "operation_name": (row["op_type"] or "").strip(),
             "total_qty": remaining_qty,
             "required_qty": required_qty,
             "planned_qty": planned_qty,
@@ -826,7 +837,7 @@ def schedule_planning_card(con, card_id, machine_id, queue_position=0):
         if not step:
             raise ValueError(f"Operation not found for scheduling: {op['source_op_no'] or op['source_op_seq_id']}")
 
-        op_name = f"{step['op_no'] or ''} {step['op_type'] or ''}".strip()
+        op_name = compact_text(step["op_type"] or "")
         op_cur = con.execute(
             """
             INSERT INTO operation (

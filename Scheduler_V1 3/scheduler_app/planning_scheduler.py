@@ -386,6 +386,18 @@ def _upsert_planning_block_state(con, block_id, planning_run_id):
         )
     ) or {}
     block = _block_row_for_schedule(con, block_id)
+    anchor_dt = compact_text(block.get("anchor_datetime") or "")
+    sched_start = compact_text(row.get("expected_start_at") or "")
+    if anchor_dt and sched_start:
+        anchor_parsed = parse_dt_text(anchor_dt)
+        sched_parsed = parse_dt_text(sched_start)
+        if anchor_parsed and sched_parsed:
+            planned_start_at = compact_text(max(anchor_parsed, sched_parsed).strftime("%Y-%m-%d %H:%M:%S"))
+        else:
+            planned_start_at = anchor_dt or sched_start
+    else:
+        planned_start_at = anchor_dt or sched_start
+    planned_end_at = compact_text(row.get("expected_end_at") or block.get("calculated_end_datetime"))
     con.execute(
         """
         INSERT INTO planning_block_state (
@@ -412,6 +424,21 @@ def _upsert_planning_block_state(con, block_id, planning_run_id):
             int(block["operation_id"]) if block else None,
         ),
     )
+    if block and (planned_start_at or planned_end_at):
+        con.execute(
+            """
+            UPDATE run_block
+            SET planned_start_at = ?,
+                planned_end_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE block_id = ?
+            """,
+            (
+                planned_start_at,
+                planned_end_at,
+                int(block_id),
+            ),
+        )
 
 
 def _upsert_planning_operation_state(con, operation_id, planning_run_id):
@@ -474,7 +501,7 @@ def _resolve_process_sheet_ps_id(con, ps_id):
         )
     )
     if not row:
-        return ps_id
+        return ""
     return compact_text(row["ps_id"] or ps_id)
 
 
@@ -482,6 +509,19 @@ def _upsert_planning_process_sheet_state(con, ps_id, planning_run_id):
     source_ps_id = compact_text(ps_id)
     resolved_ps_id = _resolve_process_sheet_ps_id(con, source_ps_id)
     if not resolved_ps_id:
+        return
+    exists = one(
+        con.execute(
+            """
+            SELECT 1
+            FROM process_sheet
+            WHERE ps_id = ?
+            LIMIT 1
+            """,
+            (resolved_ps_id,),
+        )
+    )
+    if not exists:
         return
     row = one(
         con.execute(
@@ -533,8 +573,12 @@ def _schedule_one_block(con, block, planning_run_id, machine_cursor, operation_e
     allow_pull_forward = int(block.get("allow_pull_forward") if block.get("allow_pull_forward") is not None else 1)
 
     candidate_start = current_cursor
-    if planned_start and allow_pull_forward == 0 and candidate_start < planned_start:
-        candidate_start = planned_start
+    first_block_for_machine = current_cursor == baseline_start
+    if planned_start:
+        if first_block_for_machine:
+            candidate_start = planned_start
+        elif allow_pull_forward == 0 and candidate_start < planned_start:
+            candidate_start = planned_start
 
     setup_minutes = max(0.0, float(block.get("setup_minutes") or 0)) if int(block.get("include_setup") or 0) == 1 else 0.0
     cycle_time = max(0.0, float(block.get("cycle_minutes_per_qty") or 0))
@@ -561,7 +605,7 @@ def _schedule_one_block(con, block, planning_run_id, machine_cursor, operation_e
 
     if dependency_finish and production_start_candidate < dependency_finish:
         production_start_candidate = dependency_finish
-    if planned_start and allow_pull_forward == 0 and production_start_candidate < planned_start:
+    if planned_start and allow_pull_forward == 0 and production_start_candidate < planned_start and not first_block_for_machine:
         production_start_candidate = planned_start
 
     if remaining_qty > 0 and planning_cycle_minutes > 0:

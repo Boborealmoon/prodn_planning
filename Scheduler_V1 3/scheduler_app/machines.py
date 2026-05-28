@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from .constants import TRIAL_MACHINES
 from .db import one, rows
 from .scheduler_state import active_calendar_windows_for_machine_day
 from .utils import compact_text

@@ -1099,31 +1099,3 @@ def ensure_db():
                         """,
                         (machine_code, machine_category, shift_profile),
                     )
-
-
-def ensure_actual_schema(con):
-    return None
-
-
-def ensure_rework_schema(con):
-    return None
-
-
-def ensure_group_schema(con):
-    return None
-
-
-def ensure_planning_card_schema(con):
-    return None
-
-
-def ensure_v2_compat_views(con):
-    return None
-
-
-def ensure_v2_compat_columns(con):
-    return None
-
-
-def ensure_material_requirement_schema(con):
-    return None

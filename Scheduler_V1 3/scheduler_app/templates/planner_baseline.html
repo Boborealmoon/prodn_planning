@@ -13,7 +13,7 @@
 <style>
   .planner-shell {
     display: grid;
-    gap: 14px;
+    gap: 16px;
   }
   .pl-pill-row,
   .planner-chip-row {
@@ -27,14 +27,14 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 9px;
+    padding: 3px 9px;
     border-radius: 999px;
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.01em;
-    background: rgba(37,99,235,0.08);
+    letter-spacing: 0.02em;
+    background: rgba(37,99,235,0.07);
     color: var(--text2);
-    border: 1px solid rgba(37,99,235,0.18);
+    border: 1px solid rgba(37,99,235,0.15);
   }
   .pl-pill.good,
   .planner-chip.good,
@@ -200,18 +200,21 @@
   .planner-toolbar-card {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
-    padding: 10px 12px;
+    padding: 12px 16px;
     border-radius: 16px;
-    border: 1px solid rgba(26,28,29,0.08);
-    background: rgba(255,255,255,0.82);
+    border: 1px solid rgba(26,28,29,0.09);
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(26,28,29,0.06);
   }
   .planner-toolbar-card label {
     display: grid;
-    gap: 4px;
-    font-size: 11px;
+    gap: 3px;
+    font-size: 10px;
     font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     color: var(--text3);
   }
   .planner-toolbar-card input {
@@ -220,19 +223,20 @@
     border-radius: 10px;
     background: var(--bg2);
     color: var(--text);
-    padding: 8px 10px;
+    padding: 7px 10px;
     font: inherit;
     font-size: 14px;
+    font-weight: 700;
   }
   .planner-toolbar-note {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text3);
     line-height: 1.4;
   }
   .planner-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 360px;
-    gap: 14px;
+    gap: 16px;
     align-items: start;
   }
   .planner-sidebar,
@@ -299,19 +303,28 @@
   .planner-filter-chip,
   .trial-machine-filter-btn {
     border: 1px solid var(--border);
-    background: rgba(255,255,255,0.86);
+    background: #fff;
     color: var(--text2);
     border-radius: 999px;
-    padding: 7px 10px;
-    font-size: 11px;
-    font-weight: 800;
+    padding: 6px 14px;
+    font-size: 11.5px;
+    font-weight: 700;
     cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, color 0.12s ease;
+  }
+  .planner-filter-chip:hover,
+  .trial-machine-filter-btn:hover {
+    background: rgba(37,99,235,0.05);
+    border-color: rgba(37,99,235,0.2);
+    color: var(--text);
   }
   .planner-filter-chip.active,
   .trial-machine-filter-btn.active {
-    background: rgba(59,130,246,0.1);
-    color: #184a91;
-    border-color: rgba(59,130,246,0.2);
+    background: rgba(37,99,235,0.10);
+    color: #1d4ed8;
+    border-color: rgba(37,99,235,0.28);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.07);
+    font-weight: 800;
   }
   .planner-machine-list,
   .trial-grid,
@@ -325,16 +338,22 @@
   .trial-machine {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border-radius: 22px;
-    border: 1px solid rgba(26,28,29,0.08);
-    background: rgba(255,255,255,0.9);
+    gap: 12px;
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(26,28,29,0.09);
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(26,28,29,0.05);
     flex: 1 1 320px;
     max-width: 420px;
     height: clamp(460px, calc(100vh - 260px), 720px);
     min-height: 460px;
     overflow: hidden;
+    transition: box-shadow 0.15s ease;
+  }
+  .planner-machine:hover,
+  .trial-machine:hover {
+    box-shadow: 0 4px 16px rgba(26,28,29,0.09);
   }
   .planner-machine-head,
   .trial-machine-head {
@@ -343,16 +362,18 @@
     justify-content: space-between;
     gap: 12px;
     align-items: flex-start;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(26,28,29,0.07);
   }
   .planner-machine-title,
   .trial-machine-title {
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 900;
     letter-spacing: -0.03em;
   }
   .planner-machine-meta,
   .trial-machine-meta {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text3);
     line-height: 1.45;
   }
@@ -363,7 +384,7 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 8px;
     overflow-y: auto;
     overflow-x: hidden;
     padding-right: 4px;
@@ -376,12 +397,21 @@
     flex: 0 0 auto;
     height: auto;
     min-height: 0;
-    gap: 8px;
-    padding: 12px;
-    border-radius: 18px;
-    border: 1px solid rgba(26,28,29,0.08);
-    background: linear-gradient(180deg, rgba(255,255,255,0.97), rgba(246,248,250,0.92));
+    gap: 10px;
+    padding: 13px;
+    border-radius: 14px;
+    border: 1px solid rgba(26,28,29,0.09);
+    border-left: 3px solid rgba(37,99,235,0.35);
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(26,28,29,0.04);
     cursor: grab;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .planner-block:hover,
+  .trial-block-card:hover {
+    box-shadow: 0 4px 12px rgba(26,28,29,0.09);
+    border-color: rgba(26,28,29,0.14);
+    border-left-color: rgba(37,99,235,0.55);
   }
   .planner-block.dragging,
   .trial-block-card.dragging {
@@ -414,6 +444,137 @@
     line-height: 1.4;
     overflow-wrap: anywhere;
   }
+  .planner-card-identity {
+    display: grid;
+    gap: 3px;
+  }
+  .planner-card-ps {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+  .planner-card-partial {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text2);
+  }
+  .planner-card-opn {
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+    color: var(--text);
+    overflow-wrap: anywhere;
+    margin-top: 1px;
+  }
+  .planner-card-dates {
+    display: grid;
+    gap: 8px;
+  }
+  .planner-card-row {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 72px minmax(0, 1fr);
+    align-items: start;
+  }
+  .planner-card-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+    padding-top: 9px;
+  }
+  .planner-card-compare {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .planner-compare-cell {
+    display: grid;
+    gap: 3px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(26,28,29,0.07);
+    background: rgba(248,249,250,0.85);
+  }
+  .planner-compare-cell span {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+  .planner-compare-cell strong {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .planner-compare-cell.is-late {
+    border-color: rgba(220,38,38,0.22);
+    background: rgba(220,38,38,0.08);
+  }
+  .planner-planned-start-cell {
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .planner-planned-start-cell.is-unanchored {
+    background: rgba(59,130,246,0.10);
+    border-color: rgba(59,130,246,0.35);
+    color: #1d4ed8;
+  }
+  .planner-planned-start-cell.is-anchored {
+    background: rgba(245,158,11,0.16);
+    border-color: rgba(245,158,11,0.45);
+    color: #b45309;
+  }
+  .planner-planned-start-cell:hover {
+    box-shadow: inset 0 0 0 1px currentColor;
+  }
+  .planner-current-summary {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text2);
+    padding: 5px 10px;
+    background: rgba(26,28,29,0.03);
+    border-radius: 8px;
+    margin-top: 2px;
+  }
+  .planner-card-notice-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+  }
+  .planner-card-notice {
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text2);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(245,158,11,0.22);
+    background: rgba(245,158,11,0.06);
+  }
+  .planner-card-notice.is-late {
+    border-color: rgba(220,38,38,0.22);
+    background: rgba(220,38,38,0.08);
+  }
+  .planner-card-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 2px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(26,28,29,0.06);
+  }
+  .planner-delete-btn.is-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
   .planner-block-meta,
   .trial-block-qty,
   .trial-block-meta {
@@ -433,12 +594,6 @@
   .trial-op-card-info {
     font-size: 11px;
     color: var(--text3);
-  }
-  .planner-block-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
   }
   .planner-block-dates {
     display: grid;
@@ -498,26 +653,33 @@
     background: rgba(239,68,68,0.07);
   }
   .planner-empty {
-    padding: 16px;
-    border-radius: 16px;
-    border: 1px dashed var(--border);
-    background: rgba(255,255,255,0.75);
+    padding: 18px 16px;
+    border-radius: 14px;
+    border: 1.5px dashed rgba(26,28,29,0.12);
+    background: rgba(248,249,250,0.7);
     color: var(--text3);
     font-size: 13px;
+    text-align: center;
+    line-height: 1.5;
   }
   .planner-dropzone {
     flex: 0 0 auto;
-    min-height: 104px;
+    min-height: 120px;
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
-    border: 1px dashed rgba(26,28,29,0.14);
-    background: rgba(248,249,250,0.72);
+    border: 1.5px dashed rgba(37,99,235,0.20);
+    background: rgba(37,99,235,0.025);
     color: var(--text3);
-    border-radius: 16px;
-    font-size: 13px;
-    font-weight: 700;
+    border-radius: 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .planner-dropzone:hover {
+    background: rgba(37,99,235,0.05);
+    border-color: rgba(37,99,235,0.30);
   }
   .planner-drop-spinner {
     width: 16px;
@@ -530,6 +692,29 @@
   }
   @keyframes planner-spin {
     to { transform: rotate(360deg); }
+  }
+  .planner-gap-card {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 12px;
+    border-radius: 10px;
+    border: 1px dashed rgba(26,28,29,0.13);
+    background: rgba(248,249,250,0.55);
+    pointer-events: none;
+    user-select: none;
+  }
+  .planner-gap-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text3);
+  }
+  .planner-gap-range {
+    font-size: 10px;
+    color: var(--text3);
+    white-space: nowrap;
   }
   @media (max-width: 900px) {
     .planner-machine,
@@ -547,12 +732,12 @@
   }
   .pl2-sidebar-card {
     display: grid;
-    gap: 12px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 24px;
-    background: rgba(255,255,255,0.92);
-    box-shadow: var(--shadow-md);
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid rgba(26,28,29,0.09);
+    border-radius: 20px;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(26,28,29,0.06);
     min-width: 0;
     overflow: visible;
   }
@@ -563,14 +748,15 @@
     align-items: flex-start;
   }
   .pl2-sidebar-title {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 900;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.03em;
   }
   .pl2-sidebar-note {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text3);
-    line-height: 1.45;
+    line-height: 1.5;
+    margin-top: 3px;
   }
   .pl2-sidebar-actions {
     display: flex;
@@ -582,11 +768,18 @@
   .pl2-search {
     width: 100%;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 12px;
     background: var(--bg2);
     color: var(--text);
-    padding: 10px 12px;
+    padding: 9px 12px;
     font: inherit;
+    font-size: 13px;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .pl2-search:focus {
+    outline: none;
+    border-color: rgba(37,99,235,0.4);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
   }
   .pl2-sidebar-list {
     display: grid;
@@ -599,30 +792,36 @@
   }
   .pl2-ps-card {
     display: block;
-    border: 1px solid rgba(26,28,29,0.1);
-    border-radius: 18px;
+    border: 1px solid rgba(26,28,29,0.09);
+    border-radius: 14px;
     background: #fff !important;
     overflow: visible;
-    box-shadow: 0 8px 18px rgba(26,28,29,0.05);
-    transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+    box-shadow: 0 1px 4px rgba(26,28,29,0.04);
+    transition: box-shadow 160ms ease, border-color 160ms ease;
+  }
+
+  .pl2-ps-card:hover {
+    box-shadow: 0 4px 12px rgba(26,28,29,0.08);
+    border-color: rgba(26,28,29,0.13);
   }
 
   .pl2-ps-card.is-open {
-    box-shadow: 0 12px 24px rgba(26,28,29,0.08);
-    border-color: rgba(26,28,29,0.14);
+    box-shadow: 0 4px 16px rgba(26,28,29,0.08);
+    border-color: rgba(37,99,235,0.2);
   }
   .pl2-ps-header {
     width: 100%;
     font: inherit;
     text-align: left;
-    background: rgba(248,249,250,0.95);
+    background: rgba(248,249,250,0.80);
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
-    gap: 12px;
+    gap: 10px;
     align-items: start;
-    padding: 12px 14px;
+    padding: 11px 13px;
     border-bottom: 1px solid rgba(26,28,29,0.08);
     cursor: pointer;
+    border-radius: 14px 14px 0 0;
   }
 
   .pl2-ps-action-row {
@@ -663,22 +862,23 @@
     min-width: 0;
   }
   .pl2-ps-title {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 900;
-    line-height: 1.15;
+    line-height: 1.2;
     color: var(--text);
     overflow-wrap: anywhere;
+    letter-spacing: -0.01em;
   }
   .pl2-ps-sub {
     margin-top: 2px;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text3);
   }
   .pl2-ps-right {
     text-align: right;
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text3);
-    line-height: 1.3;
+    line-height: 1.35;
     white-space: nowrap;
   }
   .pl2-ps-body {
@@ -769,20 +969,25 @@
   }
   .pl2-op-list {
     display: grid;
-    gap: 8px;
-    padding: 10px 14px 12px;
-    border-top: 1px solid rgba(26,28,29,0.08);
-    background: rgba(249,248,246,0.92);
+    gap: 7px;
+    padding: 10px 12px 12px;
+    border-top: 1px solid rgba(26,28,29,0.07);
+    background: rgba(249,248,246,0.70);
   }
   .pl2-op {
     display: grid;
     gap: 6px;
     padding: 9px 11px;
-    border-radius: 14px;
-    border: 1px solid rgba(37,99,235,0.14);
-    border-left: 3px solid rgba(37,99,235,0.5);
+    border-radius: 11px;
+    border: 1px solid rgba(37,99,235,0.12);
+    border-left: 3px solid rgba(37,99,235,0.45);
     background: #fff;
     cursor: grab;
+    transition: box-shadow 0.12s ease, border-color 0.12s ease;
+  }
+  .pl2-op:hover {
+    box-shadow: 0 2px 8px rgba(37,99,235,0.08);
+    border-color: rgba(37,99,235,0.22);
   }
   .pl2-op-top {
     display: flex;
@@ -791,13 +996,15 @@
     align-items: flex-start;
   }
   .pl2-op-title {
-    font-size: 12.5px;
-    font-weight: 850;
+    font-size: 12px;
+    font-weight: 800;
     color: var(--text);
+    letter-spacing: -0.01em;
   }
   .pl2-op-sub {
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text3);
+    margin-top: 1px;
   }
   .pl2-op-actions {
     display: flex;
@@ -805,9 +1012,10 @@
     align-items: center;
   }
   .pl2-op-badge {
-    font-size: 9.5px;
+    font-size: 9px;
     font-weight: 900;
     text-transform: uppercase;
+    letter-spacing: 0.06em;
     color: var(--text3);
   }
   .pl2-op-empty {
@@ -882,6 +1090,303 @@
   }
   .planner-modal-line small {
     color: var(--text3);
+  }
+  .planner-op-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    width: min(96vw, 1500px);
+    max-width: 96vw;
+    height: min(90vh, 860px);
+    max-height: 90vh;
+    margin: 0 auto;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.96);
+    box-shadow: 0 24px 60px rgba(15,23,42,0.18);
+    box-sizing: border-box;
+  }
+  .modal-box.modal-ops-editor {
+    width: min(96vw, 1500px);
+    max-width: 96vw;
+    height: min(90vh, 860px);
+    max-height: 90vh;
+  }
+  .planner-ops-modal {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    padding: 0;
+  }
+  .planner-ops-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex: 0 0 auto;
+    padding: 20px 24px 16px;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.98), rgba(255,255,255,0.94));
+    border-bottom: 1px solid rgba(15,23,42,0.08);
+  }
+  .planner-ops-modal-title {
+    display: grid;
+    gap: 4px;
+  }
+  .planner-ops-modal-title h2 {
+    margin: 0;
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 900;
+    color: var(--text1);
+  }
+  .planner-ops-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .planner-ops-context span {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(15,23,42,0.08);
+  }
+  .planner-ops-close {
+    flex: 0 0 auto;
+  }
+  .planner-ops-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 18px 24px 20px;
+    box-sizing: border-box;
+  }
+  .planner-ops-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .planner-ops-table-wrap {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: visible;
+    border: 1px solid rgba(15,23,42,0.08);
+    border-radius: 16px;
+    background: rgba(248,250,252,0.85);
+  }
+  .planner-ops-grid {
+    display: grid;
+    grid-template-columns: 72px 80px minmax(130px, 0.65fr) 90px 100px 160px minmax(160px, 190px) 130px;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .planner-ops-header-row {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 10px 12px;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text3);
+    background: rgba(248,250,252,0.98);
+    border-bottom: 1px solid rgba(15,23,42,0.08);
+  }
+  .planner-ops-row {
+    margin: 10px 12px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(15,23,42,0.08);
+    background: rgba(255,255,255,0.96);
+    min-width: 0;
+  }
+  .planner-ops-row.is-inactive {
+    opacity: 0.72;
+  }
+  .planner-ops-cell {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+  }
+  .planner-ops-cell > * {
+    min-width: 0;
+  }
+  .planner-ops-cell input,
+  .planner-ops-cell select,
+  .planner-ops-add-grid input,
+  .planner-ops-add-grid select {
+    width: 100%;
+    height: 36px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(15,23,42,0.14);
+    background: #fff;
+    font-size: 13px;
+    line-height: 1.2;
+    box-sizing: border-box;
+    min-width: 0;
+  }
+  .planner-ops-select.is-auto-derived {
+    background: rgba(59,130,246,0.07);
+    border-style: dashed;
+  }
+  .planner-ops-auto-note {
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--text3);
+  }
+  .planner-ops-cell input:focus,
+  .planner-ops-cell select:focus,
+  .planner-ops-add-grid input:focus,
+  .planner-ops-add-grid select:focus {
+    outline: none;
+    border-color: rgba(59,130,246,0.55);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+  }
+  .planner-ops-order-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .planner-ops-iconbtn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .planner-ops-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .planner-ops-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .planner-ops-row-error {
+    grid-column: 1 / -1;
+    font-size: 12px;
+    color: var(--red);
+    min-height: 16px;
+    margin-top: 2px;
+  }
+  .planner-ops-add-card {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(15,23,42,0.08);
+    background: rgba(248,250,252,0.88);
+  }
+  .planner-ops-add-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .planner-ops-add-card-title {
+    display: grid;
+    gap: 4px;
+  }
+  .planner-ops-add-card-title strong {
+    font-size: 14px;
+    color: var(--text1);
+  }
+  .planner-ops-add-card-title span {
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .planner-ops-add-grid {
+    display: grid;
+    grid-template-columns: 80px minmax(130px, 0.65fr) 90px 100px 160px minmax(160px, 190px) 130px;
+    gap: 8px;
+    align-items: end;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .planner-ops-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(15,23,42,0.08);
+    background: linear-gradient(to top, rgba(255,255,255,0.98), rgba(255,255,255,0.92));
+  }
+  .planner-ops-footer-note {
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .planner-ops-footer-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .planner-op-editor-error {
+    font-size: 12px;
+    color: var(--red);
+    min-height: 16px;
+  }
+  @media (max-width: 1279px) {
+    .modal-box.modal-ops-editor {
+      width: calc(100vw - 24px);
+      max-width: calc(100vw - 24px);
+      height: calc(100vh - 24px);
+      max-height: calc(100vh - 24px);
+    }
+    .planner-op-editor {
+      width: calc(100vw - 24px);
+      max-width: calc(100vw - 24px);
+      height: calc(100vh - 24px);
+      max-height: calc(100vh - 24px);
+    }
+    .planner-ops-modal-body {
+      padding: 16px 16px 18px;
+    }
+    .planner-ops-table-wrap {
+      overflow-x: auto;
+    }
+    .planner-ops-grid {
+      min-width: 1040px;
+    }
+    .planner-ops-add-grid {
+      min-width: 920px;
+    }
+  }
+  .planner-inline-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text2);
   }
   @media (max-width: 1100px) {
     .planner-layout {
@@ -969,6 +1474,7 @@ let plannerSearchTimer = null;
 let plannerDnDInFlight = false;
 let plannerSidebarSortables = [];
 let plannerSidebarPsByKey = new Map();
+let plannerOperationEditorState = null;
 let plannerMergeSheetsCache = {
   processSheets: null,
   catalog: null,
@@ -987,6 +1493,15 @@ function plannerFmtDt(value) {
   return String(value).replace('T', ' ').slice(0, 16);
 }
 
+function plannerShortDateTime(value) {
+  return plannerFmtDt(value);
+}
+
+function plannerDateOnly(value) {
+  if (!value) return '–';
+  return String(value).replace('T', ' ').slice(0, 10);
+}
+
 function plannerRange(startAt, endAt) {
   const start = plannerFmtDt(startAt);
   const end = plannerFmtDt(endAt);
@@ -998,6 +1513,101 @@ function plannerParseDateTime(value) {
   if (!text) return null;
   const parsed = Date.parse(text.replace(' ', 'T'));
   return Number.isFinite(parsed) ? new Date(parsed) : null;
+}
+
+function plannerPlannedStart(block) {
+  return String(block?.planned_start_at || '').trim();
+}
+
+function plannerPlannedEnd(block) {
+  return String(block?.planned_end_at || '').trim();
+}
+
+function plannerActualGoodQty(block) {
+  return Number(block?.actual_good_qty || 0);
+}
+
+function plannerActualTargetQty(block) {
+  return Number(block?.actual_target_qty || block?.planned_qty || block?.scheduled_qty || 0);
+}
+
+function plannerBlockTargetMet(block) {
+  const target = plannerActualTargetQty(block);
+  return target > 0 && plannerActualGoodQty(block) + 1e-9 >= target;
+}
+
+function plannerHasActualRows(block) {
+  return Number(block?.actual_row_count || 0) > 0 || plannerActualGoodQty(block) > 0;
+}
+
+function plannerDateLaterByDay(laterValue, earlierValue) {
+  const later = plannerParseDateTime(laterValue);
+  const earlier = plannerParseDateTime(earlierValue);
+  if (!later || !earlier) return false;
+  const laterDay = Date.UTC(later.getFullYear(), later.getMonth(), later.getDate());
+  const earlierDay = Date.UTC(earlier.getFullYear(), earlier.getMonth(), earlier.getDate());
+  return (laterDay - earlierDay) >= 24 * 60 * 60 * 1000;
+}
+
+function plannerMachineLaneBlocks(block) {
+  const machineId = Number(block?.machine_id || 0);
+  return (plannerState.blocks || [])
+    .filter(item => Number(item?.machine_id || 0) === machineId)
+    .slice()
+    .sort((a, b) => (
+      Number(a?.queue_position || 0) - Number(b?.queue_position || 0)
+      || Number(a?.block_id || 0) - Number(b?.block_id || 0)
+    ));
+}
+
+function plannerPreviousLaneBlock(block) {
+  const laneBlocks = plannerMachineLaneBlocks(block);
+  const id = Number(block?.block_id || 0);
+  const idx = laneBlocks.findIndex(item => Number(item?.block_id || 0) === id);
+  if (idx <= 0) return null;
+  return laneBlocks[idx - 1] || null;
+}
+
+function plannerPreviousActualOrCurrentEnd(block) {
+  const prev = plannerPreviousLaneBlock(block);
+  if (!prev) return '';
+  if (plannerBlockTargetMet(prev) && String(prev?.actual_end_at || '').trim()) {
+    return String(prev.actual_end_at).trim();
+  }
+  return String(
+    prev?.visual_end_datetime
+      || prev?.calculated_end_datetime
+      || prev?.predicted_end_at
+      || ''
+  ).trim();
+}
+
+function plannerAdjustPlannedStartAnchor(block) {
+  const prevEnd = plannerPreviousActualOrCurrentEnd(block);
+  const plannedStart = plannerPlannedStart(block);
+  if (!prevEnd || !plannedStart) return '';
+  return plannerDateLaterByDay(prevEnd, plannedStart) ? prevEnd : '';
+}
+
+async function adjustPlannerPlannedStart(blockId) {
+  const block = (plannerState.blocks || []).find(item => Number(item.block_id || 0) === Number(blockId || 0));
+  if (!block) return;
+  const anchorDatetime = plannerAdjustPlannedStartAnchor(block);
+  if (!anchorDatetime) {
+    toast('No previous late job found for this block.', 'error');
+    return;
+  }
+  try {
+    await PUT(`/api/trial/blocks/${Number(blockId || 0)}`, {
+      anchor_datetime: anchorDatetime,
+      planned_start_at: anchorDatetime,
+      allow_pull_forward: 0,
+    });
+    await loadPlannerBaseline();
+    toast('Planned start adjusted.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Adjust planned start failed');
+  }
 }
 
 // Planned = original baseline chosen by the planner.
@@ -1039,25 +1649,39 @@ function plannerDateLateClass(currentValue, plannedValue) {
   return diffDays > 1 ? 'planner-date-late' : '';
 }
 
+function plannerForecastError(block) {
+  const start = block?.visual_start_datetime || block?.calculated_start_datetime || '';
+  const end = block?.visual_end_datetime || block?.calculated_end_datetime || '';
+  if (start && end) return '';
+  if (block?.scheduled_qty && Number(block.scheduled_qty || 0) > 0) return 'Planned date missing';
+  return '';
+}
+
+function plannerIsForecastEndLater(block) {
+  const forecastEnd = block?.visual_end_datetime || block?.calculated_end_datetime || block?.predicted_end_at || '';
+  const planned = plannerPlannedEnd(block);
+  return plannerDateLaterByDay(forecastEnd, planned);
+}
+
 function plannerAlertsForBlock(blockId) {
   const id = Number(blockId || 0);
   return (Array.isArray(plannerState.alerts) ? plannerState.alerts : []).filter(alert => Number(alert?.block_id || 0) === id);
 }
 
+function plannerAllowedAlertType(alertType) {
+  return ['START_DRIFT', 'END_DRIFT', 'CYCLE_TIME_DRIFT_AFTER_3_DAYS'].includes(String(alertType || '').toUpperCase());
+}
+
 function plannerBlockAlertsHtml(block) {
-  const alerts = plannerAlertsForBlock(block.block_id);
+  const alerts = plannerAlertsForBlock(block.block_id).filter(alert => plannerAllowedAlertType(alert.alert_type));
   if (!alerts.length) return '';
   return `
     <div class="planner-block-alerts">
       ${alerts.map(alert => {
-        const type = String(alert.alert_type || '').toUpperCase();
         const severity = String(alert.severity || '').toLowerCase() === 'critical' ? 'critical' : 'warning';
-        const message = type === 'LOW_OUTPUT_AFTER_3_DAYS'
-          ? 'Output is below expected after 3 days.'
-          : String(alert.message || '');
         return `
           <div class="planner-block-alert ${severity}">
-            <div>${escapeHtml(message)}</div>
+            <div>${escapeHtml(String(alert.message || ''))}</div>
             <div class="planner-block-alert-actions">
               <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); dismissPlannerAlert(${Number(alert.alert_id || 0)})">Dismiss</button>
             </div>
@@ -1608,6 +2232,496 @@ async function selectPlannerBom(sourcePsId, partialNo, bomId) {
   }
 }
 
+function plannerOperationEditorMachineGroupOptions(selectedValue) {
+  const selected = String(selectedValue || '').trim();
+  const groups = Array.isArray(plannerOperationEditorState?.machine_groups) ? plannerOperationEditorState.machine_groups : [];
+  const options = ['<option value="">—</option>'];
+  groups.forEach(group => {
+    const value = String(group || '').trim();
+    if (!value) return;
+    options.push(`<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(value)}</option>`);
+  });
+  return options.join('');
+}
+
+function plannerOperationEditorMachineByCode(machineCode) {
+  const code = String(machineCode || '').trim();
+  if (!code) return null;
+  const machines = Array.isArray(plannerOperationEditorState?.machines) ? plannerOperationEditorState.machines : [];
+  return machines.find(machine => String(machine?.machine_code || '').trim() === code) || null;
+}
+
+function plannerOperationEditorMachineOptions(selectedValue, groupFilter = '') {
+  const selected = String(selectedValue || '').trim();
+  const group = String(groupFilter || '').trim();
+  const machines = Array.isArray(plannerOperationEditorState?.machines) ? plannerOperationEditorState.machines : [];
+  const options = ['<option value="">—</option>'];
+  machines.forEach(machine => {
+    const value = String(machine?.machine_code || '').trim();
+    if (!value) return;
+    const machineGroup = String(machine?.machine_category || '').trim();
+    if (group && machineGroup && machineGroup !== group) return;
+    const label = `${value}${machine?.machine_category ? ` (${machine.machine_category})` : ''}`;
+    options.push(`<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`);
+  });
+  if (selected && !options.some(option => option.includes(`value="${escapeHtml(selected)}"`))) {
+    const machine = plannerOperationEditorMachineByCode(selected);
+    if (machine) {
+      const label = `${String(machine.machine_code || '').trim()}${machine?.machine_category ? ` (${machine.machine_category})` : ''}`;
+      options.splice(1, 0, `<option value="${escapeHtml(selected)}" selected>${escapeHtml(label)}</option>`);
+    }
+  }
+  return options.join('');
+}
+
+function plannerOperationEditorMachineGroupForMachine(machineCode) {
+  const machine = plannerOperationEditorMachineByCode(machineCode);
+  return String(machine?.machine_category || '').trim();
+}
+
+function plannerOperationEditorSyncMachineFields(rowPrefix) {
+  const groupEl = document.getElementById(`${rowPrefix}-group`);
+  const machineEl = document.getElementById(`${rowPrefix}-machine`);
+  const noteEl = document.getElementById(`${rowPrefix}-group-note`);
+  if (!groupEl || !machineEl) return;
+  const selectedMachineCode = String(machineEl.value || '').trim();
+  const selectedMachine = plannerOperationEditorMachineByCode(selectedMachineCode);
+  if (selectedMachine && String(selectedMachine.machine_category || '').trim()) {
+    const derivedGroup = String(selectedMachine.machine_category || '').trim();
+    if (groupEl.value !== derivedGroup) {
+      groupEl.value = derivedGroup;
+    }
+    groupEl.disabled = true;
+    groupEl.classList.add('is-auto-derived');
+    groupEl.title = 'Derived from preferred machine';
+    machineEl.innerHTML = plannerOperationEditorMachineOptions(selectedMachineCode, derivedGroup);
+    machineEl.value = selectedMachineCode;
+    if (noteEl) noteEl.textContent = 'Auto from preferred machine';
+  } else {
+    groupEl.disabled = false;
+    groupEl.classList.remove('is-auto-derived');
+    groupEl.removeAttribute('title');
+    const currentGroup = String(groupEl.value || '').trim();
+    machineEl.innerHTML = plannerOperationEditorMachineOptions(selectedMachineCode, currentGroup);
+    if (selectedMachineCode) {
+      const currentMachine = plannerOperationEditorMachineByCode(selectedMachineCode);
+      if (currentGroup && currentMachine && String(currentMachine.machine_category || '').trim() && String(currentMachine.machine_category || '').trim() !== currentGroup) {
+        machineEl.value = '';
+      }
+    }
+    if (noteEl) noteEl.textContent = 'Select a group to filter preferred machines';
+  }
+}
+
+function plannerOperationEditorHandleMachineGroupChange(rowPrefix) {
+  const groupEl = document.getElementById(`${rowPrefix}-group`);
+  const machineEl = document.getElementById(`${rowPrefix}-machine`);
+  if (!groupEl || !machineEl) return;
+  if (groupEl.disabled) return;
+  const currentGroup = String(groupEl.value || '').trim();
+  const currentMachine = String(machineEl.value || '').trim();
+  machineEl.innerHTML = plannerOperationEditorMachineOptions(currentMachine, currentGroup);
+  if (currentMachine) {
+    const machine = plannerOperationEditorMachineByCode(currentMachine);
+    if (currentGroup && machine && String(machine.machine_category || '').trim() && String(machine.machine_category || '').trim() !== currentGroup) {
+      machineEl.value = '';
+    }
+  }
+  plannerOperationEditorSyncMachineFields(rowPrefix);
+}
+
+function plannerOperationEditorHandlePreferredMachineChange(rowPrefix) {
+  plannerOperationEditorSyncMachineFields(rowPrefix);
+}
+
+function plannerOperationEditorRowBadgeHtml(op) {
+  const badges = [];
+  if (Number(op?.has_planned_blocks || 0) > 0) {
+    badges.push(`<span class="pl-pill warn">Planned ${fmt(op.planned_block_count || 0, 0)}</span>`);
+  }
+  if (Number(op?.has_actual_output || 0) > 0) {
+    badges.push(`<span class="pl-pill warn">Actual ${fmt(op.actual_row_count || 0, 0)}</span>`);
+  }
+  if (!plannerBool(op?.is_active)) {
+    badges.push('<span class="pl-pill">Inactive</span>');
+  }
+  return badges.join('');
+}
+
+function plannerOperationEditorStripOpPrefix(opNo, value) {
+  const prefix = String(opNo || '').trim();
+  let text = String(value || '').trim();
+  if (!prefix || !text) return text;
+  const token = `${prefix} `;
+  let guard = 0;
+  while (text.startsWith(token) && guard < 10) {
+    text = text.slice(token.length).trimStart();
+    guard += 1;
+  }
+  return text;
+}
+
+function plannerOperationEditorRowHtml(op, index) {
+  const operationId = Number(op?.operation_id || 0);
+  const rowId = `planner-op-row-${operationId || `new-${index}`}`;
+  const rowClass = plannerBool(op?.is_active) ? '' : 'is-inactive';
+  const machineGroup = String(op?.compatible_machine_group || op?.machine_category || '').trim();
+  const preferredMachine = String(op?.preferred_machine || '').trim();
+  const derivedMachineGroup = preferredMachine ? plannerOperationEditorMachineGroupForMachine(preferredMachine) || machineGroup : machineGroup;
+  const opNo = String(op?.op_no || '').trim();
+  const opName = plannerOperationEditorStripOpPrefix(opNo, op?.operation_name || op?.op_type || '');
+  const setupMinutes = Number(op?.setup_minutes ?? op?.setup_time ?? 0);
+  const cycleMinutes = Number(op?.cycle_minutes_per_qty ?? op?.cycle_time ?? 0);
+  const orderDisabledUp = index <= 0 ? 'disabled' : '';
+  const orderDisabledDown = (plannerOperationEditorState?.operations || []).length <= index + 1 ? 'disabled' : '';
+  const machineOptionsHtml = plannerOperationEditorMachineOptions(preferredMachine, '');
+  const groupDisabled = preferredMachine ? 'disabled aria-disabled="true"' : '';
+  return `
+    <div class="planner-ops-grid planner-ops-row ${rowClass}" data-operation-id="${operationId}" id="${rowId}">
+      <div class="planner-ops-cell">
+        <div class="planner-ops-order-actions">
+          <strong>${fmt(Number(op?.seq_no || index + 1), 0)}</strong>
+          <button class="btn btn-ghost btn-xs planner-ops-iconbtn" type="button" title="Move up" onclick="plannerMoveOperationEditorRow(${operationId}, -1)" ${orderDisabledUp}>↑</button>
+          <button class="btn btn-ghost btn-xs planner-ops-iconbtn" type="button" title="Move down" onclick="plannerMoveOperationEditorRow(${operationId}, 1)" ${orderDisabledDown}>↓</button>
+        </div>
+      </div>
+      <div class="planner-ops-cell">
+        <input id="${rowId}-op-no" class="planner-ops-input" type="text" value="${escapeHtml(opNo)}" placeholder="20">
+      </div>
+      <div class="planner-ops-cell">
+        <input id="${rowId}-op-name" class="planner-ops-input" type="text" value="${escapeHtml(opName)}" placeholder="Turning 20">
+        <div class="planner-ops-badges">${plannerOperationEditorRowBadgeHtml(op)}</div>
+      </div>
+      <div class="planner-ops-cell">
+        <input id="${rowId}-setup" class="planner-ops-input" type="number" min="0" step="0.1" value="${escapeHtml(Number.isFinite(setupMinutes) ? String(setupMinutes) : '0')}">
+      </div>
+      <div class="planner-ops-cell">
+        <input id="${rowId}-cycle" class="planner-ops-input" type="number" min="0.001" step="0.001" value="${escapeHtml(Number.isFinite(cycleMinutes) ? String(cycleMinutes) : '0')}">
+      </div>
+      <div class="planner-ops-cell">
+        <select id="${rowId}-group" class="planner-ops-select ${preferredMachine ? 'is-auto-derived' : ''}" ${groupDisabled} onchange="plannerOperationEditorHandleMachineGroupChange('${rowId}')">${plannerOperationEditorMachineGroupOptions(derivedMachineGroup)}</select>
+        <div class="planner-ops-auto-note" id="${rowId}-group-note">${preferredMachine ? 'Auto from preferred machine' : 'Select a group to filter preferred machines'}</div>
+      </div>
+      <div class="planner-ops-cell">
+        <select id="${rowId}-machine" class="planner-ops-select" onchange="plannerOperationEditorHandlePreferredMachineChange('${rowId}')">${machineOptionsHtml}</select>
+      </div>
+      <div class="planner-ops-cell">
+        <div class="planner-ops-actions">
+          <button class="btn btn-primary btn-xs" type="button" onclick="plannerSaveOperationEditorRow(${operationId})">Save</button>
+          <button class="btn btn-ghost btn-xs" type="button" onclick="plannerDeleteOperationEditorRow(${operationId})">Deactivate</button>
+        </div>
+      </div>
+      <div class="planner-op-editor-error" id="${rowId}-error"></div>
+    </div>
+  `;
+}
+
+function plannerOperationEditorHtml(payload) {
+  const sourcePsId = String(payload?.source_ps_id || '').trim();
+  const partialNo = String(payload?.pp_partial_no || '').trim();
+  const bomId = Number(payload?.bom_id || 0);
+  const bomCode = String(payload?.bom_code || '').trim();
+  const operations = Array.isArray(payload?.operations) ? payload.operations : [];
+  const machines = Array.isArray(payload?.machines) ? payload.machines : [];
+  const groups = Array.isArray(payload?.machine_groups) ? payload.machine_groups : [];
+  plannerOperationEditorState = {
+    sourcePsId,
+    partialNo,
+    bomId,
+    bomCode,
+    operations,
+    machines,
+    machine_groups: groups,
+  };
+  const nextOpNo = (() => {
+    const maxNumeric = operations.reduce((max, op) => {
+      const value = Number(String(op?.op_no || '').replace(/[^0-9.]/g, ''));
+      return Number.isFinite(value) ? Math.max(max, value) : max;
+    }, 0);
+    return maxNumeric > 0 ? String(Math.round(maxNumeric) + 10) : String((operations.length + 1) * 10);
+  })();
+  const machineGroupOptions = plannerOperationEditorMachineGroupOptions('');
+  const machineOptions = plannerOperationEditorMachineOptions('', '');
+  const rowsHtml = operations.length
+    ? operations.map((op, index) => plannerOperationEditorRowHtml(op, index)).join('')
+    : '<div class="planner-empty">No operations found for this BOM.</div>';
+  openModal('Edit BOM / Ops', `
+    <div class="planner-op-editor planner-ops-modal">
+      <div class="planner-ops-modal-head">
+        <div class="planner-ops-context">
+          <span>PS: <strong>${escapeHtml(sourcePsId || '—')}</strong></span>
+          <span>Partial: <strong>${escapeHtml(partialNo || '—')}</strong></span>
+          <span>BOM: <strong>${escapeHtml(bomCode || `#${bomId || 0}`)}</strong></span>
+        </div>
+      </div>
+      <div class="planner-ops-modal-body">
+        <div class="planner-ops-toolbar planner-op-editor-toolbar">
+          <div class="planner-card-note">Edit routing steps, then Planner will recalculate future blocks.</div>
+          <div class="planner-ops-actions">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="plannerReloadOperationEditor()">Refresh</button>
+          </div>
+        </div>
+        <div class="planner-ops-table-wrap">
+          <div class="planner-ops-grid planner-ops-header-row">
+            <div>Order</div>
+            <div>Op No</div>
+            <div>Operation Name</div>
+            <div>Setup</div>
+            <div>Cycle</div>
+            <div>Machine Group</div>
+            <div>Preferred Machine</div>
+            <div>Actions</div>
+          </div>
+          ${rowsHtml}
+        </div>
+        <div class="planner-ops-add-card">
+          <div class="planner-ops-add-card-head">
+            <div class="planner-ops-add-card-title">
+              <strong>Add Operation</strong>
+              <span>New operations are inserted into this BOM routing and Planner recalculates immediately.</span>
+            </div>
+          </div>
+          <div class="planner-ops-add-grid">
+            <input id="planner-op-new-op-no" class="planner-ops-input" type="text" value="${escapeHtml(nextOpNo)}" placeholder="Op No">
+            <input id="planner-op-new-op-name" class="planner-ops-input" type="text" value="${escapeHtml(`Operation ${nextOpNo}`)}" placeholder="Operation Name">
+            <input id="planner-op-new-setup" class="planner-ops-input" type="number" min="0" step="0.1" value="0" placeholder="Setup">
+            <input id="planner-op-new-cycle" class="planner-ops-input" type="number" min="0.001" step="0.001" value="1" placeholder="Cycle">
+            <select id="planner-op-new-group" class="planner-ops-select" onchange="plannerOperationEditorHandleMachineGroupChange('planner-op-new')">${machineGroupOptions}</select>
+            <div class="planner-ops-cell">
+              <select id="planner-op-new-machine" class="planner-ops-select" onchange="plannerOperationEditorHandlePreferredMachineChange('planner-op-new')">${machineOptions}</select>
+              <div class="planner-ops-auto-note" id="planner-op-new-group-note">Select a group to filter preferred machines</div>
+            </div>
+            <button class="btn btn-primary btn-sm" type="button" onclick="plannerAddOperationFromEditor()">Add Operation</button>
+          </div>
+          <div class="planner-op-editor-error" id="planner-op-new-error"></div>
+        </div>
+      </div>
+      <div class="planner-ops-footer">
+        <div class="planner-ops-footer-note">Changes recalculate future Planner blocks only. Actual output is not changed.</div>
+        <div class="planner-ops-footer-actions">
+          <button class="btn btn-ghost btn-sm" type="button" onclick="plannerReloadOperationEditor()">Recalculate / Refresh</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  `, 'modal-ops-editor');
+}
+
+async function openPlannerOperationEditor(sourcePsId, partialNo, bomId) {
+  const normalizedSourcePsId = String(sourcePsId || '').trim();
+  if (!normalizedSourcePsId) return;
+  openModal('Edit BOM / Ops', '<div class="planner-empty">Loading operations…</div>', 'modal-ops-editor');
+  try {
+    const params = new URLSearchParams();
+    params.set('pp_partial_no', String(partialNo || '').trim());
+    params.set('bom_id', String(Number(bomId || 0)));
+    const data = await GET(`/api/trial/planner/source-ps/${encodeURIComponent(normalizedSourcePsId)}/operations?${params.toString()}`);
+    plannerOperationEditorHtml(data || {});
+  } catch (e) {
+    plannerHandleError(e, 'Operation editor failed');
+    openModal('Edit BOM / Ops', `<div class="planner-empty">Failed to load operations.<br>${escapeHtml(e && e.message ? e.message : 'Unknown error')}</div>`, 'modal-ops-editor');
+  }
+}
+
+async function plannerReloadOperationEditor() {
+  const ctx = plannerOperationEditorState || {};
+  if (!String(ctx.sourcePsId || '').trim()) return;
+  await openPlannerOperationEditor(ctx.sourcePsId, ctx.partialNo, ctx.bomId);
+}
+
+function plannerOperationEditorGetInputValue(rowId, field) {
+  return document.getElementById(`${rowId}-${field}`)?.value;
+}
+
+function plannerOperationEditorSetError(rowId, message) {
+  const el = document.getElementById(`${rowId}-error`) || document.getElementById('planner-op-new-error');
+  if (el) el.textContent = message || '';
+}
+
+function plannerOperationEditorRowPayloadFromDom(rowId) {
+  const operationId = Number(String(rowId || '').replace('planner-op-row-', '') || 0);
+  const opNo = String(plannerOperationEditorGetInputValue(rowId, 'op-no') || '').trim();
+  const opName = String(plannerOperationEditorGetInputValue(rowId, 'op-name') || '').trim();
+  const setupMinutes = Number(plannerOperationEditorGetInputValue(rowId, 'setup') || 0);
+  const cycleMinutes = Number(plannerOperationEditorGetInputValue(rowId, 'cycle') || 0);
+  const machineCategory = String(plannerOperationEditorGetInputValue(rowId, 'group') || '').trim();
+  const preferredMachine = String(plannerOperationEditorGetInputValue(rowId, 'machine') || '').trim();
+  const existing = Array.isArray(plannerOperationEditorState?.operations)
+    ? plannerOperationEditorState.operations.find(item => Number(item?.operation_id || 0) === operationId)
+    : null;
+  const active = operationId ? plannerBool(existing?.is_active) : true;
+  return {
+    operationId,
+    opNo,
+    opName,
+    setupMinutes,
+    cycleMinutes,
+    machineCategory,
+    preferredMachine,
+    active,
+  };
+}
+
+function plannerOperationEditorValidatePayload(payload, rowId, options = {}) {
+  const requireOpName = options.requireOpName !== false;
+  if (requireOpName && !payload.opName) return 'Operation name is required.';
+  if (!payload.opNo) return 'Operation number is required.';
+  if (!Number.isFinite(payload.setupMinutes) || payload.setupMinutes < 0) return 'Setup minutes must be 0 or more.';
+  if (!Number.isFinite(payload.cycleMinutes) || payload.cycleMinutes <= 0) return 'Cycle minutes per qty must be greater than 0.';
+  if (!payload.preferredMachine && !payload.machineCategory) return 'Machine group is required.';
+  if (payload.preferredMachine) {
+    const selectedMachine = plannerOperationEditorMachineByCode(payload.preferredMachine);
+    if (!selectedMachine) return 'Selected preferred machine does not exist.';
+    if (!String(selectedMachine.machine_category || '').trim()) return 'Selected preferred machine has no machine group.';
+  }
+  return '';
+}
+
+async function plannerSaveOperationEditorRow(operationId) {
+  const rowId = `planner-op-row-${Number(operationId || 0)}`;
+  const payload = plannerOperationEditorRowPayloadFromDom(rowId);
+  try {
+    const existing = Array.isArray(plannerOperationEditorState?.operations)
+      ? plannerOperationEditorState.operations.find(item => Number(item?.operation_id || 0) === Number(operationId || 0))
+      : null;
+    const ctx = plannerOperationEditorState || {};
+    const selectedMachine = (Array.isArray(ctx.machines) ? ctx.machines : []).find(m => String(m.machine_code || '').trim() === payload.preferredMachine);
+    const effectiveMachineCategory = payload.preferredMachine
+      ? String(selectedMachine?.machine_category || '').trim()
+      : payload.machineCategory;
+    const fallbackName = String(existing?.operation_name || existing?.op_type || '').trim();
+    const nextOpName = String(payload.opName || fallbackName || '').trim();
+    const error = plannerOperationEditorValidatePayload({ ...payload, opName: nextOpName, machineCategory: effectiveMachineCategory }, rowId, { requireOpName: false });
+    if (error) {
+      plannerOperationEditorSetError(rowId, error);
+      toast(error, 'error');
+      return;
+    }
+    plannerOperationEditorSetError(rowId, 'Saving...');
+    const body = {
+      source_op_no: payload.opNo,
+      operation_name: nextOpName,
+      setup_minutes: payload.setupMinutes,
+      cycle_minutes_per_qty: payload.cycleMinutes,
+      machine_category: effectiveMachineCategory,
+      preferred_machine: payload.preferredMachine,
+      machine_ids: selectedMachine ? [Number(selectedMachine.machine_id || 0)] : [],
+      is_active: payload.active,
+    };
+    const result = await PUT(`/api/trial/planner/operations/${Number(operationId || 0)}`, body);
+    plannerOperationEditorSetError(rowId, '');
+    if (Array.isArray(result?.warnings) && result.warnings.length) {
+      toast(result.warnings.join(' '), 'warning');
+    } else {
+      toast('Operation saved. Planner recalculated.', 'success');
+    }
+    await loadPlannerBaseline();
+    await plannerReloadOperationEditor();
+  } catch (e) {
+    plannerHandleError(e, 'Operation save failed');
+    plannerOperationEditorSetError(rowId, e && e.message ? e.message : 'Operation save failed.');
+  }
+}
+
+async function plannerAddOperationFromEditor() {
+  const rowId = 'planner-op-new';
+  const sourcePsId = String(plannerOperationEditorState?.sourcePsId || '').trim();
+  const partialNo = String(plannerOperationEditorState?.partialNo || '').trim();
+  const bomId = Number(plannerOperationEditorState?.bomId || 0);
+  const opNo = String(plannerOperationEditorGetInputValue(rowId, 'op-no') || '').trim();
+  const opName = String(plannerOperationEditorGetInputValue(rowId, 'op-name') || '').trim() || `Operation ${opNo || 'New'}`;
+  const setupMinutes = Number(plannerOperationEditorGetInputValue(rowId, 'setup') || 0);
+  const cycleMinutes = Number(plannerOperationEditorGetInputValue(rowId, 'cycle') || 0);
+  const machineCategory = String(plannerOperationEditorGetInputValue(rowId, 'group') || '').trim();
+  const preferredMachine = String(plannerOperationEditorGetInputValue(rowId, 'machine') || '').trim();
+  if (!sourcePsId || !bomId) {
+    plannerOperationEditorSetError(rowId, 'Missing BOM context.');
+    return;
+  }
+  try {
+    const ctx = plannerOperationEditorState || {};
+    const machine = (Array.isArray(ctx.machines) ? ctx.machines : []).find(m => String(m.machine_code || '').trim() === preferredMachine);
+    const effectiveMachineCategory = preferredMachine
+      ? String(machine?.machine_category || '').trim()
+      : machineCategory;
+    const error = plannerOperationEditorValidatePayload({ opNo, opName, setupMinutes, cycleMinutes, machineCategory: effectiveMachineCategory, preferredMachine }, rowId);
+    if (error) {
+      plannerOperationEditorSetError(rowId, error);
+      toast(error, 'error');
+      return;
+    }
+    plannerOperationEditorSetError(rowId, 'Saving...');
+    const result = await POST(`/api/trial/planner/source-ps/${encodeURIComponent(sourcePsId)}/operations`, {
+      pp_partial_no: partialNo,
+      bom_id: bomId,
+      source_op_no: opNo,
+      operation_name: opName,
+      setup_minutes: setupMinutes,
+      cycle_minutes_per_qty: cycleMinutes,
+      machine_category: effectiveMachineCategory,
+      preferred_machine: preferredMachine,
+      machine_ids: machine ? [Number(machine.machine_id || 0)] : [],
+      is_active: true,
+    });
+    plannerOperationEditorSetError(rowId, '');
+    if (Array.isArray(result?.warnings) && result.warnings.length) {
+      toast(result.warnings.join(' '), 'warning');
+    } else {
+      toast('Operation saved. Planner recalculated.', 'success');
+    }
+    await loadPlannerBaseline();
+    await plannerReloadOperationEditor();
+  } catch (e) {
+    plannerHandleError(e, 'Operation add failed');
+    plannerOperationEditorSetError(rowId, e && e.message ? e.message : 'Operation add failed.');
+  }
+}
+
+async function plannerMoveOperationEditorRow(operationId, direction) {
+  const ctx = plannerOperationEditorState || {};
+  const operations = Array.isArray(ctx.operations) ? ctx.operations.slice() : [];
+  const idx = operations.findIndex(item => Number(item?.operation_id || 0) === Number(operationId || 0));
+  if (idx < 0) return;
+  const nextIdx = idx + Number(direction || 0);
+  if (nextIdx < 0 || nextIdx >= operations.length) return;
+  const [item] = operations.splice(idx, 1);
+  operations.splice(nextIdx, 0, item);
+  try {
+    const result = await POST(`/api/trial/planner/source-ps/${encodeURIComponent(String(ctx.sourcePsId || '').trim())}/operations/reorder`, {
+      pp_partial_no: String(ctx.partialNo || '').trim(),
+      bom_id: Number(ctx.bomId || 0),
+      operation_ids: operations.map(op => Number(op?.operation_id || 0)).filter(id => id > 0),
+    });
+    if (Array.isArray(result?.warnings) && result.warnings.length) {
+      toast(result.warnings.join(' '), 'warning');
+    } else {
+      toast('Operation order updated. Planner recalculated.', 'success');
+    }
+    await loadPlannerBaseline();
+    await plannerReloadOperationEditor();
+  } catch (e) {
+    plannerHandleError(e, 'Operation reorder failed');
+  }
+}
+
+async function plannerDeleteOperationEditorRow(operationId) {
+  const numericOperationId = Number(operationId || 0);
+  if (!numericOperationId) return;
+  if (!confirm('Deactivate this operation? Existing actual history will remain untouched.')) return;
+  try {
+    const result = await DEL(`/api/trial/planner/operations/${numericOperationId}`);
+    if (Array.isArray(result?.warnings) && result.warnings.length) {
+      toast(result.warnings.join(' '), 'warning');
+    } else {
+      toast(result.message || 'Operation deactivated.', 'success');
+    }
+    await loadPlannerBaseline();
+    await plannerReloadOperationEditor();
+  } catch (e) {
+    plannerHandleError(e, 'Operation deactivate failed');
+  }
+}
+
 async function togglePlannerOpnCompletion(operationId, completed, sourcePsId = '', partialNo = '', sourceOpSeqId = 0, sourceOpNo = '', bomId = 0) {
   const numericOperationId = Number(operationId || 0);
   if (!numericOperationId) {
@@ -1805,7 +2919,7 @@ function renderPlannerSettings() {
 function renderPlannerAlerts() {
   const root = document.getElementById('planner-alerts');
   if (!root) return;
-  const alerts = Array.isArray(plannerState.alerts) ? plannerState.alerts : [];
+  const alerts = (Array.isArray(plannerState.alerts) ? plannerState.alerts : []).filter(alert => plannerAllowedAlertType(alert.alert_type));
   if (!alerts.length) {
     root.innerHTML = `<div class="planner-alerts-empty">No active alerts.</div>`;
     return;
@@ -1813,7 +2927,11 @@ function renderPlannerAlerts() {
   root.innerHTML = alerts.map(alert => {
     const alertType = String(alert.alert_type || '').toUpperCase();
     const severityClass = String(alert.severity || '').toUpperCase() === 'CRITICAL' ? 'alert-critical' : 'alert-warning';
-    const title = alertType === 'LOW_OUTPUT_AFTER_3_DAYS' ? 'Low output after 3 days' : 'Start drift alert';
+    const title = alertType === 'START_DRIFT'
+      ? 'Start drift alert'
+      : alertType === 'END_DRIFT'
+        ? 'End drift alert'
+        : 'Cycle time drift alert';
     const psLabel = escapeHtml(alert.ps_id || '—');
     const opLabel = escapeHtml(alert.source_op_no || '—');
     const message = escapeHtml(alert.message || '');
@@ -1823,15 +2941,15 @@ function renderPlannerAlerts() {
         <button class="btn btn-ghost btn-sm" type="button" onclick="dismissPlannerAlert(${Number(alert.alert_id || 0)})">Dismiss</button>
       `
       : `<button class="btn btn-ghost btn-sm" type="button" onclick="dismissPlannerAlert(${Number(alert.alert_id || 0)})">Dismiss</button>`;
-    const metrics = alertType === 'LOW_OUTPUT_AFTER_3_DAYS'
+    const metrics = alertType === 'CYCLE_TIME_DRIFT_AFTER_3_DAYS'
       ? `
-        <div class="planner-alert-meta">Expected qty by now: <strong>${fmt(alert.expected_qty_by_now || 0, 0)}</strong></div>
-        <div class="planner-alert-meta">Actual good qty: <strong>${fmt(alert.actual_good_qty || 0, 0)}</strong></div>
-        <div class="planner-alert-meta">Output efficiency: <strong>${fmt((Number(alert.output_efficiency || 0) * 100), 1)}%</strong></div>
+        <div class="planner-alert-meta">Planned cycle: <strong>${escapeHtml(String(alert.old_value || '—'))} min/pc</strong></div>
+        <div class="planner-alert-meta">Actual cycle: <strong>${escapeHtml(String(alert.new_value || '—'))} min/pc</strong></div>
+        <div class="planner-alert-meta">Days included: <strong>${fmt(alert.delay_minutes || 0, 0)}</strong></div>
       `
       : `
         <div class="planner-alert-meta">Expected start: <strong>${escapeHtml(plannerFmtDt(alert.expected_start_at || alert.planned_at || ''))}</strong></div>
-        <div class="planner-alert-meta">Actual start: <strong>${escapeHtml(plannerFmtDt(alert.actual_start_at || ''))}</strong></div>
+        <div class="planner-alert-meta">${alertType === 'END_DRIFT' ? 'Current end' : 'Actual start'}: <strong>${escapeHtml(plannerFmtDt(alert.actual_start_at || alert.predicted_at || ''))}</strong></div>
         <div class="planner-alert-meta">Drift: <strong>${fmt(Number(alert.drift_hours || 0), 1)} hours</strong></div>
       `;
     return `
@@ -1946,6 +3064,7 @@ function renderPlannerSidebar() {
             <select class="pl2-bom-select" onchange="event.stopPropagation(); selectPlannerBom('${escapeHtml(sourcePsId || '')}', '${escapeHtml(ps.pp_partial_no || ps.partial_no || '')}', this.value)">
               ${bomOptionsHtml}
             </select>
+            <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); openPlannerOperationEditor('${escapeHtml(sourcePsId || '')}', '${escapeHtml(ps.pp_partial_no || ps.partial_no || '')}', ${Number(selectedBomId || 0)})">Edit Ops</button>
           </div>
           <div class="pl2-timeline">
             <div class="pl2-timeline-row">
@@ -2003,57 +3122,85 @@ function plannerVisibleMachines() {
   });
 }
 
+function plannerGapCardHtml(block) {
+  const gap = block?.gap_after || null;
+  const availableMinutes = Number(gap?.available_minutes || 0);
+  if (!gap || availableMinutes <= 0) return '';
+  return `
+    <div class="planner-gap-card" data-gap-minutes="${availableMinutes}" aria-hidden="true">
+      <div class="planner-gap-label">${escapeHtml(gap.label || 'Available gap after actual end')} — ${fmt(availableMinutes, 0)} min available</div>
+      <div class="planner-gap-range">${escapeHtml(plannerFmtDt(gap.start_at || ''))} → ${escapeHtml(plannerFmtDt(gap.end_at || ''))}</div>
+    </div>
+  `;
+}
+
 function plannerBlockHtml(block) {
-  const segments = plannerSegmentsForBlock(block.block_id);
-  const segmentCount = segments.length;
-  const plannedStart = block.planned_start_at || block.expected_start_at || block.predicted_start_at || block.calculated_start_datetime || '';
-  const plannedEnd = block.planned_end_at || block.expected_end_at || block.predicted_end_at || block.calculated_end_datetime || '';
+  const partialNo = String(block.pp_partial_no || block.partial_no || '').trim() || '1';
+  const plannedStart = plannerPlannedStart(block);
+  const plannedEnd = plannerPlannedEnd(block);
   const currentStart = plannerCurrentStart(block);
   const currentEnd = plannerCurrentEnd(block);
   const currentStatus = plannerCurrentStatusLabel(block);
   const currentStartLateClass = plannerDateLateClass(currentStart, plannedStart);
   const currentEndLateClass = plannerDateLateClass(currentEnd, plannedEnd);
   const isAnchored = Number(block.allow_pull_forward ?? 1) === 0 || Boolean(block.anchor_datetime);
-  const anchorLabel = block.anchor_datetime ? `Anchor ${plannerFmtDt(block.anchor_datetime)}` : 'Anchored';
+  const deleteDisabled = plannerHasActualRows(block);
+  const actualOutputQty = plannerActualGoodQty(block);
+  const actualTargetQty = plannerActualTargetQty(block);
   return `
     <div class="planner-block trial-block-card" draggable="true" data-block-id="${Number(block.block_id || 0)}" data-machine-id="${Number(block.machine_id || 0)}" onclick="openPlannerBlockDetail(${Number(block.block_id || 0)})" title="Click for planning details">
-      <div class="planner-block-head trial-op-card-header">
-        <div class="planner-block-title trial-block-top">
-          <div class="planner-block-op trial-block-title">${escapeHtml(block.job_no || '')}${block.source_op_no ? ` · OP${escapeHtml(block.source_op_no)}` : ''}</div>
-          <div class="planner-block-sub trial-block-op">${escapeHtml(block.operation_name || '')}</div>
-          <div class="planner-block-actions">
-            <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); openPlannerSplitModal(${Number(block.block_id || 0)})">Split</button>
-            <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); openPlannerAnchorModal(${Number(block.block_id || 0)})">${isAnchored ? 'Edit Anchor' : 'Set Anchor'}</button>
-            ${isAnchored ? `<button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); clearPlannerAnchor(${Number(block.block_id || 0)})">Clear Anchor</button>` : ''}
-          </div>
-        </div>
-        <div class="planner-block-meta trial-block-meta">
-          <div>${escapeHtml(block.machine_code || '')}</div>
-          <div>Queue ${fmt(block.queue_position || 0, 1)}</div>
-        </div>
+      <div class="planner-card-identity">
+        <div class="planner-card-ps">${escapeHtml(block.source_ps_id || '')}</div>
+        <div class="planner-card-partial">Partial ${escapeHtml(partialNo)}</div>
+        <div class="planner-card-opn">${escapeHtml(block.operation_name || '—')}</div>
       </div>
-      <div class="planner-block-dates">
-        <div class="planner-date-row">
-          <span class="planner-date-label">Planned</span>
-          <span class="planner-date-value">${escapeHtml(plannerRange(plannedStart, plannedEnd))}</span>
-        </div>
-        <div class="planner-date-row">
-          <span class="planner-date-label">Current</span>
-          <span class="planner-date-value">
-            <span class="${escapeHtml(currentStartLateClass)}">${escapeHtml(plannerFmtDt(currentStart))}</span>
-            →
-            <span class="${escapeHtml(currentEndLateClass)}">${escapeHtml(plannerFmtDt(currentEnd))}</span>
-          </span>
-          <span class="planner-date-status">${escapeHtml(currentStatus)}</span>
-        </div>
-      </div>
-      ${plannerBlockAlertsHtml(block)}
       <div class="planner-chip-row trial-op-card-statuses">
         <span class="trial-pill">Qty ${fmt(block.planned_qty || block.scheduled_qty || 0, 0)}</span>
-        <span class="trial-pill">Plan ${fmt(block.planned_minutes || 0, 0)}m</span>
-        ${isAnchored ? `<span class="trial-pill yellow">${escapeHtml(anchorLabel)}</span>` : ''}
       </div>
-      <div class="planner-block-seg-summary">${segmentCount ? `${segmentCount} planning segment${segmentCount === 1 ? '' : 's'} · tap for details` : 'No planning segments'}</div>
+      <div class="planner-card-dates">
+        <div class="planner-card-row">
+          <div class="planner-card-label">Planned</div>
+          <div class="planner-card-compare">
+            <div class="planner-compare-cell planner-planned-start-cell ${isAnchored ? 'is-anchored' : 'is-unanchored'}" role="button" tabindex="0" title="${isAnchored ? 'Edit anchor' : 'Set anchor'}" onclick="event.stopPropagation(); openPlannerAnchorModal(${Number(block.block_id || 0)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openPlannerAnchorModal(${Number(block.block_id || 0)});}">
+              <span>Start</span>
+              <strong>${escapeHtml(plannerShortDateTime(plannedStart))}</strong>
+            </div>
+            <div class="planner-compare-cell">
+              <span>End</span>
+              <strong>${escapeHtml(plannerShortDateTime(plannedEnd))}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="planner-card-row">
+          <div class="planner-card-label">Current</div>
+          <div class="planner-card-compare">
+            <div class="planner-compare-cell ${escapeHtml(currentStartLateClass)}">
+              <span>Start</span>
+              <strong>${escapeHtml(plannerShortDateTime(currentStart))}</strong>
+            </div>
+            <div class="planner-compare-cell ${escapeHtml(currentEndLateClass)}">
+              <span>End</span>
+              <strong>${escapeHtml(plannerShortDateTime(currentEnd))}</strong>
+            </div>
+          </div>
+        </div>
+        <div class="planner-current-summary">
+          ${escapeHtml(currentStatus)} · Output ${fmt(actualOutputQty, 0)} / ${fmt(actualTargetQty || block.scheduled_qty || 0, 0)}
+        </div>
+        ${plannerAdjustPlannedStartAnchor(block) ? `
+          <div class="planner-card-notice is-late">
+            <div class="planner-card-notice-row">
+              <span>Previous job ended later than planned</span>
+              <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); adjustPlannerPlannedStart(${Number(block.block_id || 0)})">Adjust planned start</button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+      ${plannerBlockAlertsHtml(block)}
+      <div class="planner-card-actions">
+        <button class="btn btn-ghost btn-xs" type="button" onclick="event.stopPropagation(); openPlannerSplitModal(${Number(block.block_id || 0)})">Split</button>
+        <button class="btn btn-ghost btn-xs planner-delete-btn ${deleteDisabled ? 'is-disabled' : ''}" type="button" ${deleteDisabled ? 'disabled aria-disabled="true" title="Has actual quantity. Open card details to delete."' : `onclick="event.stopPropagation(); plannerDeleteBlock(${Number(block.block_id || 0)})"`}>Delete</button>
+      </div>
     </div>
   `;
 }
@@ -2132,6 +3279,16 @@ async function clearPlannerAnchor(blockId) {
   }
 }
 
+async function plannerDeleteBlock(blockId) {
+  try {
+    await DEL(`/api/trial/blocks/${Number(blockId || 0)}`);
+    await loadPlannerBaseline();
+    toast('Block unscheduled.', 'success');
+  } catch (e) {
+    plannerHandleError(e, 'Unschedule failed');
+  }
+}
+
 function openPlannerSplitModal(blockId) {
   const block = (plannerState.blocks || []).find(item => String(item.block_id) === String(blockId));
   if (!block) return;
@@ -2204,7 +3361,9 @@ function renderPlannerMachines() {
   root.innerHTML = machines.map(machine => {
     const blocks = plannerBlocksForMachine(machine.machine_id);
     const totalMinutes = blocks.reduce((sum, block) => sum + Number(block.planned_minutes || 0), 0);
-    const blockHtml = blocks.length ? blocks.map(plannerBlockHtml).join('') : `<div class="planner-dropzone">Drop an operation here</div>`;
+    const blockHtml = blocks.length
+      ? blocks.map(block => plannerBlockHtml(block) + plannerGapCardHtml(block)).join('')
+      : `<div class="planner-dropzone">Drop an operation here</div>`;
     return `
       <article class="planner-machine trial-machine">
         <div class="planner-machine-head trial-machine-head">
@@ -2328,6 +3487,12 @@ function openPlannerBlockDetail(blockId) {
       <div>${escapeHtml(`${fmt(seg.planned_qty || 0, 0)} pcs · ${fmt(seg.planned_minutes || 0, 0)} min`)}</div>
     </div>
   `).join('') : `<div class="planner-empty">No planning segments for this block.</div>`;
+  const actualStartLine = String(block.actual_start_at || '').trim()
+    ? `<div class="planner-modal-line"><span>Actual Start</span><strong>${escapeHtml(plannerDateOnly(block.actual_start_at))}</strong></div>`
+    : '';
+  const actualEndLine = String(block.actual_end_at || '').trim()
+    ? `<div class="planner-modal-line"><span>Actual End</span><strong>${escapeHtml(plannerDateOnly(block.actual_end_at))}</strong></div>`
+    : '';
   openModal('Planned Block', `
     <div class="planner-modal-grid">
       <div class="planner-modal-section">
@@ -2340,7 +3505,8 @@ function openPlannerBlockDetail(blockId) {
           <div class="planner-modal-line"><span>Planned</span><strong>${escapeHtml(plannerRange(block.expected_start_at, block.expected_end_at))}</strong></div>
           <div class="planner-modal-line"><span>Current</span><strong>${escapeHtml(plannerRange(plannerCurrentStart(block), plannerCurrentEnd(block)))}</strong></div>
           <div class="planner-modal-line"><span>Forecast</span><strong>${escapeHtml(plannerRange(block.expected_start_at || block.predicted_start_at || block.planned_start_at, block.expected_end_at || block.predicted_end_at || block.planned_end_at))}</strong></div>
-          <div class="planner-modal-line"><span>Actual</span><strong>${escapeHtml(plannerRange(block.actual_start_at, block.actual_end_at))}</strong></div>
+          ${actualStartLine}
+          ${actualEndLine}
         </div>
       </div>
       <div class="planner-modal-section">

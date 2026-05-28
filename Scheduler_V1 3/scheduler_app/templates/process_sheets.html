@@ -1,14 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Process Sheets - Production Planner{% endblock %}
-<!-- ACTIVE_PROCESS_SHEETS_TEMPLATE: scheduler_app/templates/process_sheets.html -->
 {% block page_title %}Process Sheets{% endblock %}
 {% block page_actions %}
 <button class="btn btn-ghost" onclick="refreshProcessSheets()">Refresh / Recalculate</button>
 <a class="btn btn-primary" href="/planner">Open Planner</a>
 {% endblock %}
 {% block content %}
-<!-- ACTIVE_PROCESS_SHEETS_TEMPLATE: scheduler_app/templates/process_sheets.html -->
-
 <style>
 .ps-main-id { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
 .ps-sub-id { margin-top: 2px; color: var(--text3); font-size: 11px; font-weight: 600; }

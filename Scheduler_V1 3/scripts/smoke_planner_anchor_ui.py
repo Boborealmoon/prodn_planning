@@ -145,8 +145,8 @@ def main():
         planner_page = client.get("/planner").get_data(as_text=True)
         if "openPlannerAnchorModal" not in planner_page or "submitPlannerAnchor" not in planner_page or "clearPlannerAnchor" not in planner_page:
             return fail("Planner page is missing anchor controls")
-        if "Set Anchor" not in planner_page and "Edit Anchor" not in planner_page:
-            return fail("Planner page is missing anchor action text")
+        if "planner-planned-start-cell" not in planner_page:
+            return fail("Planner page is missing the clickable planned start anchor cell")
         actual_page = client.get("/actual-production").get_data(as_text=True)
         for text in ("openTrialAnchorModal", "submitTrialAnchor", "Set Anchor", "Clear Anchor", "trial-anchor-datetime", "trial-edit-anchor-datetime", "trial-anchor-input"):
             if text in actual_page:

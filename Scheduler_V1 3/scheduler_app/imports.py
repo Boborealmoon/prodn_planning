@@ -245,12 +245,40 @@ def sync_operations_for_flow(con, bom_id):
                     )
                 )
             if not existing_op:
+                operation_name = compact_text(step["op_type"] or "")
+                cur = con.execute(
+                    """
+                    INSERT INTO operation (
+                      job_no, operation_name, total_qty, setup_minutes, cycle_minutes_per_qty, compatible_machine_group,
+                      source_ps_id, pp_partial_no, selected_bom_id, source_op_seq_id, source_op_no, status, remarks, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        ps_id,
+                        operation_name,
+                        0.0,
+                        parse_number(step["setup_time"], 0),
+                        parse_number(step["cycle_time"], 0),
+                        compact_text(step["machine_category"]) or "UNKNOWN",
+                        ps_id,
+                        compact_text(ps_row.get("pp_partial_no") or ""),
+                        bom_id,
+                        int(step["op_seq_id"] or 0),
+                        op_no,
+                        "ACTIVE",
+                        "",
+                    ),
+                )
+                updated_operation_ids.add(int(cur.lastrowid))
                 continue
 
             con.execute(
                 """
                 UPDATE operation
                 SET operation_name = ?,
+                    job_no = ?,
+                    pp_partial_no = ?,
+                    selected_bom_id = ?,
                     setup_minutes = ?,
                     cycle_minutes_per_qty = ?,
                     compatible_machine_group = ?,
@@ -260,7 +288,10 @@ def sync_operations_for_flow(con, bom_id):
                 WHERE operation_id = ?
                 """,
                 (
-                    f"{step['op_no'] or ''} {step['op_type'] or ''}".strip(),
+                    compact_text(step["op_type"] or ""),
+                    ps_id,
+                    compact_text(ps_row.get("pp_partial_no") or ""),
+                    bom_id,
                     parse_number(step["setup_time"], 0),
                     parse_number(step["cycle_time"], 0),
                     compact_text(step["machine_category"]) or "UNKNOWN",

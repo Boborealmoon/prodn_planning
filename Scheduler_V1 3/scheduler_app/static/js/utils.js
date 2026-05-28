@@ -1,13 +1,75 @@
 /* utils.js - shared helpers */
 
 // Toast notifications
-function toast(msg, type = 'info', duration = 3500) {
+function toastDismissKey(msg, type) {
+  return `toast.dismissed.${String(type || 'info').toLowerCase()}.${String(msg || '').trim()}`;
+}
+
+function toastReadDismissal(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (_err) {
+    return null;
+  }
+}
+
+function toastWriteDismissal(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_err) {
+    return false;
+  }
+  return true;
+}
+
+function toast(msg, type = 'info', duration = 0, options = {}) {
   const tc = document.getElementById('toast-container');
+  if (!tc) return null;
+
+  const dismissible = options.dismissible !== false;
+  const persistDismissal = options.persistDismissal !== false;
+  const key = String(options.dismissKey || toastDismissKey(msg, type)).trim();
+
+  if (persistDismissal && key && toastReadDismissal(key) === '1') {
+    return null;
+  }
+
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
-  el.textContent = msg;
+  el.dataset.toastKey = key;
+
+  const text = document.createElement('div');
+  text.className = 'toast-message';
+  text.textContent = msg;
+  el.appendChild(text);
+
+  if (dismissible) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-dismiss';
+    btn.setAttribute('aria-label', 'Dismiss notification');
+    btn.innerHTML = '&times;';
+    btn.addEventListener('click', () => {
+      if (persistDismissal && key) {
+        toastWriteDismissal(key, '1');
+      }
+      el.classList.add('is-closing');
+      setTimeout(() => el.remove(), 120);
+    });
+    el.appendChild(btn);
+  }
+
   tc.appendChild(el);
-  setTimeout(() => el.remove(), duration);
+
+  if (duration !== 0) {
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      el.classList.add('is-closing');
+      setTimeout(() => el.remove(), 120);
+    }, duration);
+  }
+
+  return el;
 }
 
 // API helpers
@@ -51,31 +113,7 @@ function openModal(title, bodyHtml, size = '') {
   box.className = 'modal-box ' + size;
   document.getElementById('global-modal').style.display = 'flex';
 }
-function openChoiceModal(title, bodyHtml, choices = []) {
-  return new Promise((resolve) => {
-    const buttons = choices.map((choice, idx) => {
-      const cls = choice.className || 'btn btn-primary';
-      return `<button class="${cls}" id="choice-modal-btn-${idx}">${choice.label}</button>`;
-    }).join(' ');
-    openModal(title, `
-      <div style="display:grid;gap:12px">
-        <div>${bodyHtml}</div>
-        <div class="modal-footer" style="padding:0;margin-top:16px;justify-content:flex-end">
-          ${buttons}
-        </div>
-      </div>`);
-    setTimeout(() => {
-      choices.forEach((choice, idx) => {
-        const btn = document.getElementById(`choice-modal-btn-${idx}`);
-        if (!btn) return;
-        btn.addEventListener('click', () => {
-          closeModal();
-          resolve(choice.value);
-        }, { once: true });
-      });
-    }, 0);
-  });
-}
+
 function closeModal() {
   document.getElementById('global-modal').style.display = 'none';
   document.getElementById('modal-body').innerHTML = '';
@@ -94,15 +132,6 @@ function fmt(v, dec = 0) {
   if (v == null || v === '') return '–';
   return Number(v).toFixed(dec);
 }
-function fmtDate(d) {
-  if (!d) return '–';
-  return d.split('T')[0];
-}
-function minToHHMM(m) {
-  const h = Math.floor(m / 60);
-  const mn = m % 60;
-  return `${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;
-}
 
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -113,68 +142,3 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-// Planner status badge
-function plannerStatusBadge(s) {
-  const map = {
-    'NEEDS_REVIEW': ['badge-orange','Needs Review'],
-    'UNPLANNED': ['badge-gray','Unplanned'],
-    'COMPLETED': ['badge-green','Completed'],
-    'PARTIALLY_PLANNED': ['badge-yellow','Partially Planned'],
-    'PLANNED': ['badge-blue','Planned'],
-  };
-  const [cls, label] = map[s] || ['badge-gray', s];
-  return `<span class="badge ${cls}">${label}</span>`;
-}
-
-// Warning chips
-function warningChips(warnings) {
-  if (!warnings || !warnings.length) return '';
-  const map = {
-    'OVERDUE': ['warn-overdue', 'Overdue'],
-    'MATERIAL_PENDING': ['warn-material', 'Mat Pending'],
-    'MATERIAL_SHORTAGE': ['warn-shortage', 'Shortage'],
-    'NO_MACHINIST': ['warn-staff', 'No Machinist'],
-    'UNPLANNED': ['warn-unplanned', 'Unplanned'],
-    'PARTIALLY_PLANNED': ['warn-unplanned', 'Partial Plan'],
-    'PLANNED': ['warn-unplanned', 'Planned'],
-    'COMPLETION_REVIEW': ['warn-overdue', 'Review Needed'],
-  };
-  return warnings.map(w => {
-    const [cls, label] = map[w] || ['warn-unplanned', w];
-    return `<span class="warn-chip ${cls}">${label}</span>`;
-  }).join(' ');
-}
-
-// Loading placeholder
-function loadingEl() {
-  return `<div class="loading"><div class="spinner"></div> Loading...</div>`;
-}
-
-// Confirm dialog
-function confirm2(msg) {
-  return window.confirm(msg);
-}
-
-// Debounce
-function debounce(fn, ms) {
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
-}
-
-// Simple drag-and-drop for sortable lists
-function makeSortable(container, onSort) {
-  let dragged = null;
-  container.querySelectorAll('[draggable]').forEach(el => {
-    el.addEventListener('dragstart', () => { dragged = el; el.classList.add('dragging'); });
-    el.addEventListener('dragend', () => { dragged = null; el.classList.remove('dragging'); if (onSort) onSort(); });
-    el.addEventListener('dragover', e => {
-      e.preventDefault();
-      if (dragged && dragged !== el) {
-        const rect = el.getBoundingClientRect();
-        const mid = rect.top + rect.height / 2;
-        if (e.clientY < mid) el.before(dragged);
-        else el.after(dragged);
-      }
-    });
-  });
-}

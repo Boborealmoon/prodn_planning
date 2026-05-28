@@ -1,13 +1,75 @@
 /* utils.js - shared helpers */
 
 // Toast notifications
-function toast(msg, type = 'info', duration = 3500) {
+function toastDismissKey(msg, type) {
+  return `toast.dismissed.${String(type || 'info').toLowerCase()}.${String(msg || '').trim()}`;
+}
+
+function toastReadDismissal(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (_err) {
+    return null;
+  }
+}
+
+function toastWriteDismissal(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_err) {
+    return false;
+  }
+  return true;
+}
+
+function toast(msg, type = 'info', duration = 0, options = {}) {
   const tc = document.getElementById('toast-container');
+  if (!tc) return null;
+
+  const dismissible = options.dismissible !== false;
+  const persistDismissal = options.persistDismissal !== false;
+  const key = String(options.dismissKey || toastDismissKey(msg, type)).trim();
+
+  if (persistDismissal && key && toastReadDismissal(key) === '1') {
+    return null;
+  }
+
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
-  el.textContent = msg;
+  el.dataset.toastKey = key;
+
+  const text = document.createElement('div');
+  text.className = 'toast-message';
+  text.textContent = msg;
+  el.appendChild(text);
+
+  if (dismissible) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-dismiss';
+    btn.setAttribute('aria-label', 'Dismiss notification');
+    btn.innerHTML = '&times;';
+    btn.addEventListener('click', () => {
+      if (persistDismissal && key) {
+        toastWriteDismissal(key, '1');
+      }
+      el.classList.add('is-closing');
+      setTimeout(() => el.remove(), 120);
+    });
+    el.appendChild(btn);
+  }
+
   tc.appendChild(el);
-  setTimeout(() => el.remove(), duration);
+
+  if (duration !== 0) {
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      el.classList.add('is-closing');
+      setTimeout(() => el.remove(), 120);
+    }, duration);
+  }
+
+  return el;
 }
 
 // API helpers

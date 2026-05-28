@@ -1137,6 +1137,14 @@ function trialActualModalHost() {
   return document.getElementById('modal-body') || document.getElementById('trial-modal-shell');
 }
 
+function trialActualEmptyRowsMessage(blockId) {
+  const block = (trialState.blocks || []).find(item => String(item.block_id) === String(blockId));
+  if (String(block?.actual_daily_rows_error || '') === 'NO_PRODUCTION_SEGMENTS') {
+    return 'No scheduled target rows for this block. Recalculate schedule or check planning data.';
+  }
+  return 'No scheduled target rows. Recalculate schedule or add a date manually.';
+}
+
 function trialPlannedTargetQtyForDate(blockId, reportDate) {
   const plannedRows = trialActualRowsForBlock(blockId).filter(row => String(row.report_date || '') === String(reportDate || ''));
   if (plannedRows.length) {
@@ -1159,19 +1167,6 @@ async function saveSegmentActual(segmentId, patch, options = {}) {
 
 function trialActualDailyRowsForBlock(block) {
   let rows = Array.isArray(block?.actual_daily_rows) ? block.actual_daily_rows : [];
-  if (!rows.length && block?.block_id) {
-    rows = trialActualRowsForBlock(block.block_id).map(row => ({
-      report_date: row.report_date,
-      original_report_date: row.actual_only ? row.report_date : '',
-      target_qty: Number(row.target_qty || 0),
-      output_qty: row.actual?.output_qty ?? '',
-      reject_qty: row.actual?.reject_qty ?? '',
-      remarks: row.actual?.remarks ?? '',
-      is_planned_row: !row.actual_only,
-      is_existing_actual: Boolean(row.actual),
-      locked_date: true,
-    }));
-  }
   return rows.map(row => ({
     report_date: String(row.report_date || '').trim(),
     original_report_date: String(row.original_report_date || row.report_date || '').trim(),
@@ -1253,7 +1248,10 @@ function trialActualFieldBlur(event, blockId, rowEl, field) {
   if (!rowEl || String(rowEl.dataset.saving || '0') === '1') return;
   const current = trialActualRowFieldValue(rowEl, field);
   const previous = trialActualRowFieldLastSaved(rowEl, field);
-  rowEl.querySelector(`[data-trial-actual-field="${field}"]`)?.dataset.focusValue = current;
+  const input = trialActualRowFieldElement(rowEl, field);
+  if (input) {
+    input.dataset.focusValue = current;
+  }
   if (current === previous) return;
   trialAutosaveActualRow(blockId, rowEl, 'blur');
 }
@@ -1311,7 +1309,7 @@ async function trialAutosaveActualRow(blockId, rowEl, reason) {
     trialResetActualDraft(blockId, data.block || trialState.blocks.find(block => String(block.block_id) === String(blockId)) || null);
     trialRenderActualDailyRows(blockId, data.actual_daily_rows || (data.block && data.block.actual_daily_rows) || []);
     trialActualRowSetStatus(rowEl, 'Saved', 'is-saved');
-    await loadTrial();
+    renderTrial();
     return data;
   } catch (err) {
     console.error('Actual row save failed', err);
@@ -1352,7 +1350,7 @@ async function trialDeleteActualDailyRow(rowEl, blockId) {
     trialResetActualDraft(blockId, data.block || trialState.blocks.find(block => String(block.block_id) === String(blockId)) || null);
     trialRenderActualDailyRows(blockId, data.actual_daily_rows || (data.block && data.block.actual_daily_rows) || []);
     trialActualRowSetStatus(rowEl, 'Saved', 'is-saved');
-    await loadTrial();
+    renderTrial();
     toast('Date removed.', 'success');
     return data;
   } catch (err) {
@@ -1384,7 +1382,7 @@ function trialRenderActualDailyRows(blockId, rows) {
   const grid = shell.querySelector(`[data-trial-actual-daily-grid="${String(blockId)}"]`);
   if (!grid) return;
   const dailyRows = Array.isArray(rows) ? rows : [];
-  grid.innerHTML = dailyRows.map(row => trialActualDailyRowHtml(blockId, row)).join('') || '<div class="trial-catalog-empty">No scheduled target rows. Recalculate schedule or add a date manually.</div>';
+  grid.innerHTML = dailyRows.map(row => trialActualDailyRowHtml(blockId, row)).join('') || `<div class="trial-catalog-empty">${escapeHtml(trialActualEmptyRowsMessage(blockId))}</div>`;
 }
 
 function trialActualDailyRowHtml(blockId, row, options = {}) {
@@ -2045,9 +2043,21 @@ function openTrialBlockEditor(blockId) {
   }, 0);
 }
 
-function openTrialActualModal(blockId) {
-  const block = trialState.blocks.find(item => String(item.block_id) === String(blockId));
+async function openTrialActualModal(blockId) {
+  let block = trialState.blocks.find(item => String(item.block_id) === String(blockId));
   if (!block) return;
+  try {
+    const data = await GET(`/api/trial/blocks/${Number(blockId) || 0}`);
+    if (data && data.block) {
+      block = data.block;
+      trialState.blocks = (trialState.blocks || []).map(item => String(item.block_id) === String(blockId) ? { ...item, ...data.block } : item);
+      if (!trialState.blocks.some(item => String(item.block_id) === String(blockId))) {
+        trialState.blocks = [...(trialState.blocks || []), data.block];
+      }
+    }
+  } catch (err) {
+    console.warn('Actual output modal refresh failed, using cached block', err);
+  }
   trialResetActualDraft(blockId, block);
   const outputTotal = (trialState.actuals || [])
     .filter(row => String(row.block_id) === String(blockId) && row.output_qty !== null && row.output_qty !== undefined)
@@ -2060,7 +2070,7 @@ function openTrialActualModal(blockId) {
   const dailyRows = trialActualDailyRowsForBlock(block);
   const rowsHtml = dailyRows.length
     ? dailyRows.map(row => trialActualDailyRowHtml(blockId, row)).join('')
-    : `<div class="trial-catalog-empty">No scheduled target rows. Recalculate schedule or add a date manually.</div>`;
+    : `<div class="trial-catalog-empty">${escapeHtml(trialActualEmptyRowsMessage(blockId))}</div>`;
   const cardPsId = String(block.job_no || block.source_ps_id || '').trim();
   const cardOperationLabel = String(block.source_op_no || block.operation_name || '').trim();
   const cardMachineCode = String(block.machine_code || '').trim();

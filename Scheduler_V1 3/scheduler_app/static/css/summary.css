@@ -84,12 +84,6 @@
   line-height: 1.4;
 }
 
-.summary-range-display {
-  font-size: 12px;
-  color: var(--text);
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
 
 .summary-custom-portal {
   position: fixed;
@@ -476,9 +470,6 @@
   background: rgba(245,158,11,0.72);
 }
 
-.summary-oee-idle {
-  background: rgba(26,28,29,0.12);
-}
 
 .summary-oee-metrics {
   display: grid;
@@ -616,8 +607,7 @@
 }
 
 .summary-mini-card,
-.summary-list-card,
-.summary-panel-card {
+.summary-list-card {
   padding: 12px;
   border-radius: 18px;
   border: 1px solid rgba(26,28,29,0.08);
